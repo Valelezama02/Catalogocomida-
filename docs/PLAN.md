@@ -33,9 +33,11 @@
 | Lunes | 4 + Érica = 5 | 4 | **9** | 5 |
 | Mar–Vie | 4 + Tati + Érica = 6 | 4 | **10** | 6 |
 | Sábado | 4 + Tati = 5 | 4 | **9** | 5 |
-| Domingo | 4 | 4 | **8** | 4 |
-| **Semana** | | | **66 porciones** | **38 desayunos** |
-| **Quincena** | | | **≈141 porciones** | **≈81 desayunos** |
+| Domingo | 4 | 4 | **8 × probabilidad de comer en casa** | 4 |
+| **Semana** | | | **58–66 porciones** | **38 desayunos** |
+| **Quincena** | | | **≈125–141 porciones** | **≈81 desayunos** |
+
+**Domingos:** es probable que salgan a comer o pidan domicilio. Antes de cada lista la app pregunta "¿los domingos comen en casa / a veces fuera / siempre fuera?" y ajusta (por defecto: *a veces*, cuenta medio domingo, para no quedarse cortos).
 
 Más Gracia aparte. Esto **lo calcula la app sola** a partir del horario de cada persona; si alguien se va de viaje o hay visita, se marca y el cálculo cambia.
 
@@ -217,7 +219,16 @@ quincenas       (fecha de mercado, lista generada, lista comprada)
 
 ---
 
-## 9. Preguntas abiertas (para decidir antes de programar)
+## 9. Decisiones tomadas
+
+1. **Grupo familiar:** todos en la casa instalan la app y comparten un mismo hogar; cada quien anota lo que consumió. Cada movimiento guarda **quién** lo anotó.
+2. **Facturas:** son **físicas** → se escanean con foto, siempre se pueden **editar** (si algo se leyó mal) y hay opción de **registrar a mano** si se perdió la factura o faltó algo.
+3. **Vencimientos:** cada compra tiene una **fecha estimada de vencimiento** (según el producto y si va a nevera, despensa o congelador), editable.
+4. **Cero compras a mitad de quincena:** los perecederos se resuelven con congelación, menú ordenado por caducidad y sustitutos de larga duración. La lista lo dice explícitamente.
+5. **Cuestionario antes de cada mercado (personalizable):** quiénes van a estar, días de ausencia, comidas al día en casa, domingos, invitados → con eso se calcula la lista.
+6. **Tecnología:** la que se considere mejor → app web instalable (PWA). Primera versión guarda los datos en el celular; la siguiente conecta el grupo familiar en la nube (Supabase).
+
+## 10. Preguntas originales
 
 1. ¿Quién va a registrar los usos y conteos en el día a día? (¿Rosita tiene celular con internet?)
 2. ¿En qué supermercado(s) hacen el mercado? ¿Les llega la factura electrónica al correo?
