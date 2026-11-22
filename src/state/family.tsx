@@ -1,5 +1,5 @@
 import type { Session } from '@supabase/supabase-js';
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { friendlyError, supabase } from '../sync/client';
 import type { CloudInfo } from '../sync/useCloudSync';
 
@@ -91,10 +91,12 @@ export function FamilyGate({ children }: { children: (cloud: CloudInfo, personId
     if (uid) refresh();
   }, [uid, refresh]);
 
+  const reqSeq = useRef(0);
   const reloadMembers = useCallback(async () => {
     if (!membership) return;
+    const seq = ++reqSeq.current;
     const { data } = await sb().from('members').select('user_id, display_name, email, person_id, role').eq('family_id', membership.familyId).order('joined_at');
-    setMembers((data as MemberRow[]) ?? []);
+    if (seq === reqSeq.current) setMembers((data as MemberRow[]) ?? []); // descarta respuestas viejas
   }, [membership]);
 
   useEffect(() => {
@@ -111,13 +113,17 @@ export function FamilyGate({ children }: { children: (cloud: CloudInfo, personId
   const personId = localPerson === undefined ? membership.personId : localPerson;
 
   const setPersonId = async (id: string | null) => {
-    setLocalPerson(id);
-    if (id) {
-      await sb().from('members').update({ person_id: id }).eq('family_id', membership.familyId).eq('user_id', session.user.id);
-      setMembership({ ...membership, personId: id });
-      setLocalPerson(undefined);
-      reloadMembers();
+    if (!id) {
+      setLocalPerson(null); // solo muestra la pantalla para escoger perfil
+      return;
     }
+    // se ve al instante; se guarda en la nube por detrás
+    reqSeq.current++; // cualquier lista pedida antes ya no sirve
+    setMembers((ms) => ms.map((m) => (m.user_id === session.user.id ? { ...m, person_id: id } : m)));
+    setMembership({ ...membership, personId: id });
+    setLocalPerson(undefined);
+    const { error } = await sb().from('members').update({ person_id: id }).eq('family_id', membership.familyId).eq('user_id', session.user.id);
+    if (error) console.warn('No se pudo guardar el perfil', error);
   };
 
   const ctx: FamilyCtx = {

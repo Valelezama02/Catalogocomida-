@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Section } from '../components';
 import { useFamily } from '../state/family';
 import { useStore } from '../state/store';
@@ -8,6 +8,10 @@ export default function FamilySection() {
   const fam = useFamily();
   const { state, setUser } = useStore();
   const [msg, setMsg] = useState<string | null>(null);
+  const reload = fam?.reloadMembers;
+  useEffect(() => {
+    reload?.();
+  }, [reload]);
 
   if (!fam)
     return (
@@ -73,7 +77,7 @@ export default function FamilySection() {
                 {me && <span className="tag">tú</span>}
                 <br />
                 <span className="muted small">
-                  {m.email} · {personName(m.person_id) ? `es ${personName(m.person_id)}` : 'sin perfil'}
+                  {m.email} · {personName(me ? membership.personId : m.person_id) ? `es ${personName(me ? membership.personId : m.person_id)}` : 'sin perfil'}
                 </span>
               </span>
               {isAdmin && !me && (
