@@ -26,7 +26,6 @@ interface FamilyCtx {
   membership: Membership;
   members: MemberRow[];
   reloadMembers: () => Promise<void>;
-  setPersonId: (id: string | null) => Promise<void>;
   regenerateCode: () => Promise<void>;
   removeMember: (userId: string) => Promise<void>;
   setRole: (userId: string, role: 'admin' | 'member') => Promise<void>;
@@ -56,12 +55,11 @@ async function loadMembership(userId: string): Promise<Membership | null> {
   return { familyId: m.family_id, familyName: m.families.name, joinCode: m.families.join_code, role: m.role, personId: m.person_id, displayName: m.display_name };
 }
 
-export function FamilyGate({ children }: { children: (cloud: CloudInfo, personId: string | null, setPersonId: (id: string | null) => void) => ReactNode }) {
+export function FamilyGate({ children }: { children: (cloud: CloudInfo, author: string) => ReactNode }) {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [recovery, setRecovery] = useState(false);
   const [membership, setMembership] = useState<Membership | null | undefined>(undefined);
   const [members, setMembers] = useState<MemberRow[]>([]);
-  const [localPerson, setLocalPerson] = useState<string | null | undefined>(undefined);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -88,7 +86,6 @@ export function FamilyGate({ children }: { children: (cloud: CloudInfo, personId
 
   useEffect(() => {
     setMembership(undefined);
-    setLocalPerson(undefined);
     if (uid) refresh();
   }, [uid, refresh]);
 
@@ -111,28 +108,11 @@ export function FamilyGate({ children }: { children: (cloud: CloudInfo, personId
   if (membership === undefined) return <Splash text="Buscando tu familia…" />;
   if (!membership) return <FamilyScreen session={session} onDone={refresh} />;
 
-  const personId = localPerson === undefined ? membership.personId : localPerson;
-
-  const setPersonId = async (id: string | null) => {
-    if (!id) {
-      setLocalPerson(null); // solo muestra la pantalla para escoger perfil
-      return;
-    }
-    // se ve al instante; se guarda en la nube por detrás
-    reqSeq.current++; // cualquier lista pedida antes ya no sirve
-    setMembers((ms) => ms.map((m) => (m.user_id === session.user.id ? { ...m, person_id: id } : m)));
-    setMembership({ ...membership, personId: id });
-    setLocalPerson(undefined);
-    const { error } = await sb().from('members').update({ person_id: id }).eq('family_id', membership.familyId).eq('user_id', session.user.id);
-    if (error) console.warn('No se pudo guardar el perfil', error);
-  };
-
   const ctx: FamilyCtx = {
     session,
     membership,
     members,
     reloadMembers,
-    setPersonId,
     regenerateCode: async () => {
       const { data, error } = await sb().rpc('regenerate_join_code', { fid: membership.familyId });
       if (error) throw error;
@@ -158,7 +138,7 @@ export function FamilyGate({ children }: { children: (cloud: CloudInfo, personId
   };
 
   const cloud: CloudInfo = { client: sb(), familyId: membership.familyId, isAdmin: membership.role === 'admin' };
-  return <Ctx.Provider value={ctx}>{children(cloud, personId, setPersonId)}</Ctx.Provider>;
+  return <Ctx.Provider value={ctx}>{children(cloud, membership.displayName)}</Ctx.Provider>;
 }
 
 function Splash({ text, retry }: { text: string; retry?: () => void }) {

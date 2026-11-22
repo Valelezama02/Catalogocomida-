@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { useEffect, useRef, useState } from 'react';
+import { migrate } from '../domain/migrate';
 import type { AppState } from '../domain/types';
 import { applyRecords, diffRecords, recKey, stable, toRecords, type RemoteRec } from './records';
 
@@ -35,6 +36,8 @@ const lsSet = (k: string, v: string) => {
 export function useCloudSync(cloud: CloudInfo | undefined, state: AppState, setState: (fn: (s: AppState) => AppState) => void, emptyState: () => AppState) {
   const [status, setStatus] = useState<SyncStatus>(cloud ? 'cargando' : 'ok');
   const [ready, setReady] = useState(!cloud);
+  const [needsDbUpdate, setNeedsDbUpdate] = useState(false);
+  const blockedKinds = useRef(new Set<string>());
   const synced = useRef<Record<string, string>>({});
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -74,7 +77,7 @@ export function useCloudSync(cloud: CloudInfo | undefined, state: AppState, setS
       const prev = lsGet(PULLED_KEY);
       if (!prev || last > prev) lsSet(PULLED_KEY, last);
     }
-    setState((s) => applyRecords(s, recs));
+    setState((s) => migrate(applyRecords(s, recs)));
   }
 
   async function push() {
@@ -87,19 +90,37 @@ export function useCloudSync(cloud: CloudInfo | undefined, state: AppState, setS
     try {
       do {
         pushAgain.current = false;
-        const { upserts, deletes } = diffRecords(toRecords(stateRef.current), synced.current);
+        const diff = diffRecords(toRecords(stateRef.current), synced.current);
+        const upserts = diff.upserts.filter((r) => !blockedKinds.current.has(r.kind));
+        const deletes = diff.deletes.filter((r) => !blockedKinds.current.has(r.kind));
         if (!upserts.length && !deletes.length) break;
         setStatus('subiendo');
         const rows = [
           ...upserts.map((r) => ({ family_id: fid, kind: r.kind, id: r.id, data: r.data, deleted: false })),
           ...deletes.map((r) => ({ family_id: fid, kind: r.kind, id: r.id, data: null, deleted: true })),
         ];
-        for (let i = 0; i < rows.length; i += 500) {
-          const { error } = await cloud.client.from('records').upsert(rows.slice(i, i + 500), { onConflict: 'family_id,kind,id' });
-          if (error) throw error;
+        // se sube por tipo: si la base de datos no acepta un tipo nuevo, lo demás igual se guarda
+        const kinds = Array.from(new Set(rows.map((r) => r.kind)));
+        const done = new Set<string>();
+        for (const kind of kinds) {
+          const part = rows.filter((r) => r.kind === kind);
+          let ok = true;
+          for (let i = 0; i < part.length; i += 500) {
+            const { error } = await cloud.client.from('records').upsert(part.slice(i, i + 500), { onConflict: 'family_id,kind,id' });
+            if (error) {
+              if (error.code === '23514') {
+                blockedKinds.current.add(kind);
+                setNeedsDbUpdate(true);
+                ok = false;
+                break;
+              }
+              throw error;
+            }
+          }
+          if (ok) done.add(kind);
         }
-        for (const r of upserts) synced.current[recKey(r.kind, r.id)] = stable(r.data);
-        for (const r of deletes) delete synced.current[recKey(r.kind, r.id)];
+        for (const r of upserts) if (done.has(r.kind)) synced.current[recKey(r.kind, r.id)] = stable(r.data);
+        for (const r of deletes) if (done.has(r.kind)) delete synced.current[recKey(r.kind, r.id)];
         saveSynced();
       } while (pushAgain.current);
       setStatus('ok');
@@ -210,5 +231,5 @@ export function useCloudSync(cloud: CloudInfo | undefined, state: AppState, setS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fid, ready]);
 
-  return { status, ready, syncNow: () => push().then(pull) };
+  return { status, ready, needsDbUpdate, syncNow: () => push().then(pull) };
 }

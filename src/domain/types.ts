@@ -47,6 +47,8 @@ export interface Product {
   category: Category;
   location: Location;
   unit: Unit;
+  countName?: string; // si unit = 'und': en qué se cuenta (bolsa, paquete, huevo…)
+  auto: boolean; // true: se descuenta solo según la regla; false: solo cuando alguien anota
   packageSize: number; // en la unidad base
   packageLabel: string; // ej. "cubeta x30"
   shelfLifeDays: number; // en su lugar por defecto
@@ -56,6 +58,8 @@ export interface Product {
   substituteId?: string; // con qué se reemplaza si no alcanza a durar
   keywords: string[]; // otros nombres (para leer facturas)
   active: boolean;
+  v?: number; // versión del formato de unidades (2 = actual)
+  legacyFactor?: number; // para convertir datos viejos a la unidad nueva
 }
 
 export type PersonType = 'residente' | 'empleada' | 'bebe';
@@ -84,6 +88,7 @@ export interface Movement {
   location?: Location; // compras
   expiry?: ISODate; // compras: vencimiento (editable)
   receiptId?: string;
+  v?: number;
 }
 
 export interface ReceiptLine {
@@ -104,6 +109,7 @@ export interface Receipt {
   lines: ReceiptLine[];
   createdAt: string;
   by?: string;
+  v?: number;
 }
 
 /** Respuestas del cuestionario antes de cada mercado. */
@@ -124,14 +130,38 @@ export interface Settings {
   nextMarket: ISODate;
 }
 
+/** Algo que hace falta comprar (lo anotan las personas de la casa). */
+export interface ListItem {
+  id: string;
+  productId?: string;
+  text: string; // nombre (del catálogo o libre)
+  qty?: number; // en la unidad del producto
+  qtyText?: string; // cantidad libre si no es del catálogo
+  note?: string;
+  by?: string; // nombre de quien lo pidió
+  checked: boolean;
+  createdAt: string;
+}
+
+/** Nota para la casa. */
+export interface Note {
+  id: string;
+  text: string;
+  by?: string;
+  done: boolean;
+  createdAt: string;
+}
+
 export interface AppState {
-  version: 1;
+  version: number;
   people: Person[];
   products: Product[];
   movements: Movement[];
   receipts: Receipt[];
   aliases: Record<string, string>; // texto normalizado de factura → productId
   plans: QuincenaPlan[];
-  checked: Record<string, boolean>; // `${planId}:${productId}` → comprado
+  checked: Record<string, boolean>; // (formato viejo, ya no se usa)
+  list: ListItem[];
+  notes: Note[];
   settings: Settings;
 }

@@ -1,156 +1,82 @@
 import { useMemo, useState } from 'react';
 import type { Nav } from '../App';
 import { addDays, diffDays, fmtDate } from '../domain/dates';
-import { buildShoppingList } from '../domain/engine';
+import { buildShoppingList, type ShoppingItem } from '../domain/engine';
 import { fmtQty } from '../domain/format';
-import { CATEGORIES, type QuincenaPlan } from '../domain/types';
+import { normalize } from '../domain/receipt';
+import { CATEGORIES, type ListItem, type Product, type QuincenaPlan } from '../domain/types';
 import { uid, useStore } from '../state/store';
 
+/** Cómo se muestra la cantidad de algo en la lista. */
+function listQty(item: ListItem, p?: Product): string {
+  if (!p) return item.qtyText ?? '';
+  const q = item.qty ?? p.packageSize;
+  if (p.unit === 'und' && p.packageSize > 1) {
+    const packs = Math.round((q / p.packageSize) * 2) / 2;
+    return `${packs.toLocaleString('es-CO')} × ${p.packageLabel}`;
+  }
+  return fmtQty(q, p);
+}
+
 export default function Market({ nav }: { nav: Nav }) {
-  const { state } = useStore();
+  const { state, statuses, today, calc, update, author } = useStore();
+  const [showPlan, setShowPlan] = useState(false);
+  const [showSug, setShowSug] = useState(false);
   const next = state.settings.nextMarket;
-  const plan = [...state.plans].filter((p) => p.start === next).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
-  const [editing, setEditing] = useState(false);
+  const byId = useMemo(() => new Map(state.products.map((p) => [p.id, p])), [state.products]);
 
-  if (!plan || editing) return <Questionnaire existing={plan} onDone={() => setEditing(false)} />;
-  return <ShoppingList plan={plan} onEdit={() => setEditing(true)} nav={nav} />;
-}
+  const plan: QuincenaPlan = useMemo(() => {
+    const saved = [...state.plans].filter((p) => p.start === next).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
+    return (
+      saved ?? {
+        id: 'auto',
+        start: next,
+        end: addDays(next, state.settings.quincenaDays),
+        absentDays: {},
+        sundayOut: state.settings.sundayOut,
+        meals: { desayuno: true, almuerzo: true, cena: true },
+        guestMeals: 0,
+        createdAt: '',
+      }
+    );
+  }, [state.plans, state.settings, next]);
 
-const SUNDAY_OPTS = [
-  { v: 0, label: 'Comemos en casa' },
-  { v: 0.5, label: 'A veces salimos o pedimos' },
-  { v: 1, label: 'Siempre salimos o pedimos' },
-];
+  const suggestions = useMemo(() => buildShoppingList(state, statuses, plan, today, calc, fmtQty, fmtDate), [state, statuses, plan, today, calc]);
+  const inList = new Set(state.list.filter((i) => !i.checked && i.productId).map((i) => i.productId));
+  const sug = suggestions.filter((s) => s.packages > 0 && !inList.has(s.product.id));
 
-function Questionnaire({ existing, onDone }: { existing?: QuincenaPlan; onDone: () => void }) {
-  const { state, update } = useStore();
-  const [start, setStart] = useState(existing?.start ?? state.settings.nextMarket);
-  const [end, setEnd] = useState(existing?.end ?? addDays(state.settings.nextMarket, state.settings.quincenaDays));
-  const [absent, setAbsent] = useState<Record<string, number>>(existing?.absentDays ?? {});
-  const [sundayOut, setSundayOut] = useState(existing?.sundayOut ?? state.settings.sundayOut);
-  const [meals, setMeals] = useState(existing?.meals ?? { desayuno: true, almuerzo: true, cena: true });
-  const [guests, setGuests] = useState(existing?.guestMeals ?? 0);
-  const days = Math.max(1, diffDays(start, end));
+  const list = state.list;
+  const pending = list.filter((i) => !i.checked).length;
 
-  const save = () => {
-    const plan: QuincenaPlan = { id: existing?.id ?? uid(), start, end, absentDays: absent, sundayOut, meals, guestMeals: guests, createdAt: new Date().toISOString() };
-    update((s) => ({ ...s, settings: { ...s.settings, nextMarket: start }, plans: [...s.plans.filter((p) => p.id !== plan.id), plan] }));
-    onDone();
-  };
+  const addItems = (items: ListItem[]) => update((s) => ({ ...s, list: [...s.list, ...items] }));
+  const setItem = (id: string, patch: Partial<ListItem>) => update((s) => ({ ...s, list: s.list.map((i) => (i.id === id ? { ...i, ...patch } : i)) }));
+  const removeItem = (id: string) => update((s) => ({ ...s, list: s.list.filter((i) => i.id !== id) }));
 
-  return (
-    <div className="screen">
-      <h1>Antes de hacer la lista</h1>
-      <p className="muted">Responde estas preguntas para esta quincena. Con eso la app calcula cuánto comprar.</p>
-
-      <div className="card form">
-        <h2>1. ¿Cuándo?</h2>
-        <div className="row2">
-          <label className="field">
-            <span>Día del mercado</span>
-            <input type="date" value={start} onChange={(e) => e.target.value && setStart(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>Próximo mercado</span>
-            <input type="date" value={end} min={addDays(start, 1)} onChange={(e) => e.target.value && setEnd(e.target.value)} />
-          </label>
-        </div>
-        <p className="muted small">Son {days} días.</p>
-      </div>
-
-      <div className="card form">
-        <h2>2. ¿Quiénes van a estar?</h2>
-        <p className="muted small">Si alguien viaja o no viene algunos días, escribe cuántos días no va a estar.</p>
-        <ul className="countlist">
-          {state.people
-            .filter((p) => p.active)
-            .map((p) => (
-              <li key={p.id}>
-                <div>
-                  <div className="name">{p.name}</div>
-                  <div className="muted small">{p.type === 'empleada' ? 'Desayuno y almuerzo' : p.type === 'bebe' ? 'Menú propio' : 'Todas las comidas'}</div>
-                </div>
-                <label className="inline">
-                  <input type="number" inputMode="numeric" min="0" max={days} value={absent[p.id] ?? 0} onChange={(e) => setAbsent({ ...absent, [p.id]: Math.max(0, Number(e.target.value) || 0) })} />
-                  <span className="muted small">días fuera</span>
-                </label>
-              </li>
-            ))}
-        </ul>
-      </div>
-
-      <div className="card form">
-        <h2>3. ¿Qué comidas se hacen en casa?</h2>
-        <div className="chips">
-          {(['desayuno', 'almuerzo', 'cena'] as const).map((m) => (
-            <button key={m} className={`chip ${meals[m] ? 'on' : ''}`} onClick={() => setMeals({ ...meals, [m]: !meals[m] })}>
-              {meals[m] ? '✓ ' : ''}
-              {m.charAt(0).toUpperCase() + m.slice(1)}
-            </button>
-          ))}
-        </div>
-        <p className="muted small">La cena es lo mismo que el almuerzo, así que se cocina una sola vez al día.</p>
-      </div>
-
-      <div className="card form">
-        <h2>4. ¿Y los domingos?</h2>
-        <div className="seg vertical">
-          {SUNDAY_OPTS.map((o) => (
-            <button key={o.v} className={sundayOut === o.v ? 'on' : ''} onClick={() => setSundayOut(o.v)}>
-              {o.label}
-            </button>
-          ))}
-        </div>
-        <p className="muted small">“A veces” cuenta medio domingo, para no quedarse cortos.</p>
-      </div>
-
-      <div className="card form">
-        <h2>5. ¿Visitas?</h2>
-        <label className="field">
-          <span>Comidas extra para invitados en toda la quincena (ej. 4 invitados a un almuerzo = 4)</span>
-          <input type="number" inputMode="numeric" min="0" value={guests} onChange={(e) => setGuests(Math.max(0, Number(e.target.value) || 0))} />
-        </label>
-      </div>
-
-      <div className="sticky">
-        <button className="primary wide" onClick={save}>
-          Generar lista del mercado
-        </button>
-        {existing && (
-          <button className="link wide" onClick={onDone}>
-            Cancelar
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ShoppingList({ plan, onEdit, nav }: { plan: QuincenaPlan; onEdit: () => void; nav: Nav }) {
-  const { state, statuses, today, calc, update } = useStore();
-  const [showAll, setShowAll] = useState(false);
-  const items = useMemo(() => buildShoppingList(state, statuses, plan, today, calc, fmtQty, fmtDate), [state, statuses, plan, today, calc]);
-  const toBuy = items.filter((i) => i.packages > 0);
-  const enough = items.filter((i) => i.packages === 0 && i.need > 0);
-  const key = (id: string) => `${plan.id}:${id}`;
-  const done = toBuy.filter((i) => state.checked[key(i.product.id)]).length;
-  const toFreeze = toBuy.filter((i) => i.freeze > 0);
-
-  const toggle = (id: string) => update((s) => ({ ...s, checked: { ...s.checked, [key(id)]: !s.checked[key(id)] } }));
+  const fromSuggestion = (s: ShoppingItem): ListItem => ({
+    id: uid(),
+    productId: s.product.id,
+    text: s.product.name,
+    qty: s.packages * s.product.packageSize,
+    note: s.notes.length ? s.notes.join(' ') : undefined,
+    by: 'Sugerido por la app',
+    checked: false,
+    createdAt: new Date().toISOString(),
+  });
 
   const finish = () => {
-    if (!confirm('¿Terminaste el mercado? Ahora registra la factura para cargar lo que se compró.')) return;
-    update((s) => ({ ...s, settings: { ...s.settings, nextMarket: plan.end } }));
+    const bought = list.filter((i) => i.checked).length;
+    if (!confirm(`¿Terminaron el mercado? Se quitan de la lista las ${bought} cosas marcadas como compradas; lo que no se consiguió queda para la próxima. Después registra la factura.`)) return;
+    update((s) => ({ ...s, list: s.list.filter((i) => !i.checked), settings: { ...s.settings, nextMarket: plan.end } }));
     nav.go('facturas');
   };
 
   const share = async () => {
-    const lines: string[] = [`Mercado ${fmtDate(plan.start)}`];
-    for (const c of CATEGORIES) {
-      const its = toBuy.filter((i) => i.product.category === c);
+    const lines: string[] = [`🛒 Mercado ${fmtDate(next)}`];
+    for (const c of [...CATEGORIES]) {
+      const its = list.filter((i) => !i.checked && (i.productId ? byId.get(i.productId)?.category : 'Otros') === c);
       if (!its.length) continue;
       lines.push('', `*${c}*`);
-      for (const i of its) lines.push(`- ${i.product.name}: ${i.packages} × ${i.product.packageLabel}`);
+      for (const i of its) lines.push(`- ${i.text}${listQty(i, i.productId ? byId.get(i.productId) : undefined) ? `: ${listQty(i, i.productId ? byId.get(i.productId) : undefined)}` : ''}${i.note && i.by !== 'Sugerido por la app' ? ` (${i.note})` : ''}`);
     }
     const text = lines.join('\n');
     try {
@@ -166,81 +92,117 @@ function ShoppingList({ plan, onEdit, nav }: { plan: QuincenaPlan; onEdit: () =>
 
   return (
     <div className="screen">
-      <div className="row between">
-        <h1>Lista del mercado</h1>
-        <button className="secondary" onClick={onEdit}>
-          Cambiar respuestas
-        </button>
-      </div>
+      <h1>Lista del mercado</h1>
       <p className="muted small">
-        Para {fmtDate(plan.start)} → {fmtDate(plan.end)} ({diffDays(plan.start, plan.end)} días + colchón). {done}/{toBuy.length} en el carrito.
+        Mercado del {fmtDate(next)} ({diffDays(today, next) > 0 ? `en ${diffDays(today, next)} días` : 'hoy'}).{' '}
+        <button className="link" onClick={() => nav.go('ajustes')}>
+          Cambiar fecha
+        </button>
       </p>
 
-      {toFreeze.length > 0 && (
-        <div className="card infobox">
-          <b>❄️ Al llegar del mercado, congelar:</b>
-          <ul>
-            {toFreeze.map((i) => (
-              <li key={i.product.id}>
-                {i.product.name}: ≈{fmtQty(i.freeze, i.product)}
-              </li>
-            ))}
-          </ul>
-          <span className="muted small">Así dura toda la quincena sin volver a comprar.</span>
-        </div>
-      )}
+      <AddForm author={author} onAdd={(i) => addItems([i])} />
 
-      {CATEGORIES.map((c) => {
-        const its = toBuy.filter((i) => i.product.category === c);
-        if (!its.length) return null;
-        return (
-          <div key={c}>
-            <div className="group">{c}</div>
-            <ul className="shop">
-              {its.map((i) => {
-                const on = !!state.checked[key(i.product.id)];
-                return (
-                  <li key={i.product.id} className={on ? 'done' : ''} onClick={() => toggle(i.product.id)}>
-                    <span className={`check ${on ? 'on' : ''}`}>{on ? '✓' : ''}</span>
-                    <div className="grow">
-                      <div className="name">
-                        {i.product.name} <b>· {i.packages} × {i.product.packageLabel}</b>
-                      </div>
-                      <div className="muted small">
-                        Se van a usar ≈{fmtQty(i.need, i.product)} · hay {fmtQty(i.have, i.product)} · comprar ≈{fmtQty(i.buy, i.product)}
-                      </div>
-                      {i.notes.map((n, k) => (
-                        <div key={k} className="note">
-                          {n}
+      {pending === 0 && list.length === 0 ? (
+        <p className="muted center">La lista está vacía. Agrega lo que haga falta, o usa las sugerencias de abajo.</p>
+      ) : (
+        [...CATEGORIES].map((c) => {
+          const its = list.filter((i) => (i.productId ? byId.get(i.productId)?.category ?? 'Otros' : 'Otros') === c);
+          if (!its.length) return null;
+          return (
+            <div key={c}>
+              <div className="group">{c}</div>
+              <ul className="shop">
+                {its.map((i) => {
+                  const p = i.productId ? byId.get(i.productId) : undefined;
+                  const step = p ? p.packageSize : 0;
+                  return (
+                    <li key={i.id} className={i.checked ? 'done' : ''}>
+                      <button className={`check ${i.checked ? 'on' : ''}`} onClick={() => setItem(i.id, { checked: !i.checked })} aria-label="Comprado">
+                        {i.checked ? '✓' : ''}
+                      </button>
+                      <div className="grow">
+                        <div className="name">
+                          {i.text} {listQty(i, p) && <b>· {listQty(i, p)}</b>}
                         </div>
-                      ))}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        );
-      })}
-
-      <button className="link" onClick={() => setShowAll(!showAll)}>
-        {showAll ? 'Ocultar' : 'Ver'} lo que ya alcanza ({enough.length})
-      </button>
-      {showAll && (
-        <ul className="history">
-          {enough.map((i) => (
-            <li key={i.product.id}>
-              <span>
-                {i.product.name} <span className="muted small">· hay {fmtQty(i.have, i.product)}, se usan ≈{fmtQty(i.need, i.product)}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
+                        {i.note && <div className="note">{i.note}</div>}
+                        {i.by && <div className="muted small">{i.by === 'Sugerido por la app' ? '💡 sugerido por la app' : `pidió ${i.by}`}</div>}
+                      </div>
+                      {p && !i.checked && (
+                        <div className="stepper">
+                          <button onClick={() => setItem(i.id, { qty: Math.max(step, (i.qty ?? step) - step) })}>−</button>
+                          <button onClick={() => setItem(i.id, { qty: (i.qty ?? step) + step })}>+</button>
+                        </div>
+                      )}
+                      <button className="link danger" onClick={() => removeItem(i.id)} aria-label="Quitar">
+                        ✕
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          );
+        })
       )}
+
+      <div className="card">
+        <div className="cardhead">
+          <h2>💡 La app sugiere ({sug.length})</h2>
+          <button className="link" onClick={() => setShowSug(!showSug)}>
+            {showSug ? 'Ocultar' : 'Ver sugerencias'}
+          </button>
+        </div>
+        <p className="muted small">
+          Cálculo aproximado de lo que se va a necesitar hasta el {fmtDate(plan.end)}, según lo que hay y quiénes van a estar.{' '}
+          <button className="link" onClick={() => setShowPlan(!showPlan)}>
+            {showPlan ? 'Cerrar' : '¿Quiénes van a estar?'}
+          </button>
+        </p>
+        {showPlan && <PlanForm plan={plan} onDone={() => setShowPlan(false)} />}
+        {showSug && sug.length > 0 && (
+          <>
+            <button className="secondary wide" onClick={() => addItems(sug.map(fromSuggestion))}>
+              Agregar todas a la lista
+            </button>
+            {[...CATEGORIES].map((c) => {
+              const its = sug.filter((x) => x.product.category === c);
+              if (!its.length) return null;
+              return (
+                <div key={c}>
+                  <div className="group">{c}</div>
+                  <ul className="sug">
+                    {its.map((s) => (
+                      <li key={s.product.id}>
+                        <div className="grow">
+                          <div className="name">
+                            {s.product.name} <b>· {listQty({ id: '', text: '', checked: false, createdAt: '', qty: s.packages * s.product.packageSize }, s.product)}</b>
+                          </div>
+                          <div className="muted small">
+                            Quedan ≈{fmtQty(s.have, s.product)} · en la quincena se usan ≈{fmtQty(s.need, s.product)}
+                          </div>
+                          {s.notes.map((n, k) => (
+                            <div key={k} className="muted small">
+                              ℹ️ {n}
+                            </div>
+                          ))}
+                        </div>
+                        <button className="chip" onClick={() => addItems([fromSuggestion(s)])}>
+                          + Agregar
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </>
+        )}
+        {showSug && sug.length === 0 && <p className="muted small">Nada más por sugerir. 👍</p>}
+      </div>
 
       <div className="sticky">
         <div className="actions2">
-          <button className="secondary" onClick={share}>
+          <button className="secondary" onClick={share} disabled={!pending}>
             Compartir lista
           </button>
           <button className="primary" onClick={finish}>
@@ -248,6 +210,158 @@ function ShoppingList({ plan, onEdit, nav }: { plan: QuincenaPlan; onEdit: () =>
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function AddForm({ author, onAdd }: { author?: string; onAdd: (i: ListItem) => void }) {
+  const { state } = useStore();
+  const [text, setText] = useState('');
+  const [pid, setPid] = useState<string | null>(null);
+  const [packs, setPacks] = useState(1);
+  const [qtyText, setQtyText] = useState('');
+  const [note, setNote] = useState('');
+  const p = pid ? state.products.find((x) => x.id === pid) : undefined;
+
+  const matches = useMemo(() => {
+    const q = normalize(text);
+    if (!q || p) return [];
+    return state.products
+      .filter((x) => x.active && normalize([x.name, ...x.keywords].join(' ')).includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name, 'es'))
+      .slice(0, 6);
+  }, [text, p, state.products]);
+
+  const reset = () => {
+    setText('');
+    setPid(null);
+    setPacks(1);
+    setQtyText('');
+    setNote('');
+  };
+
+  const submit = () => {
+    const name = p ? p.name : text.trim();
+    if (!name) return;
+    onAdd({
+      id: uid(),
+      productId: p?.id,
+      text: name,
+      qty: p ? packs * p.packageSize : undefined,
+      qtyText: p ? undefined : qtyText.trim() || undefined,
+      note: note.trim() || undefined,
+      by: author,
+      checked: false,
+      createdAt: new Date().toISOString(),
+    });
+    reset();
+  };
+
+  const packWord = p ? (p.unit === 'und' && p.packageSize === 1 ? fmtQty(packs, p) : p.unit === 'g' ? fmtQty(packs * p.packageSize, p) : `${packs} × ${p.packageLabel}`) : '';
+
+  return (
+    <div className="card form">
+      <h2>¿Qué hace falta?</h2>
+      {p ? (
+        <div className="row between">
+          <b>{p.name}</b>
+          <button className="link" onClick={reset}>
+            Cambiar
+          </button>
+        </div>
+      ) : (
+        <input className="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="Ej. leche, pañales, bombillo…" />
+      )}
+      {matches.length > 0 && (
+        <div className="chips">
+          {matches.map((m) => (
+            <button key={m.id} className="chip" onClick={() => setPid(m.id)}>
+              {m.name}
+            </button>
+          ))}
+        </div>
+      )}
+      {p ? (
+        <div className="row between">
+          <span>Cantidad: {packWord}</span>
+          <div className="stepper">
+            <button onClick={() => setPacks(Math.max(p.unit === 'und' && p.packageSize === 1 ? 0.5 : 1, packs - (p.unit === 'und' && p.packageSize === 1 && packs <= 1 ? 0.5 : 1)))}>−</button>
+            <button onClick={() => setPacks(packs < 1 ? 1 : packs + 1)}>+</button>
+          </div>
+        </div>
+      ) : (
+        text.trim() && (
+          <label className="field">
+            <span>Cantidad (opcional)</span>
+            <input value={qtyText} onChange={(e) => setQtyText(e.target.value)} placeholder="ej. 2 paquetes" />
+          </label>
+        )
+      )}
+      {(p || text.trim()) && (
+        <>
+          <label className="field">
+            <span>Nota (opcional)</span>
+            <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="ej. la marca de siempre, talla 5…" />
+          </label>
+          <button className="primary wide" onClick={submit}>
+            Agregar a la lista
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+const SUNDAY_OPTS = [
+  { v: 0, label: 'Comemos en casa' },
+  { v: 0.5, label: 'A veces salimos o pedimos' },
+  { v: 1, label: 'Siempre salimos o pedimos' },
+];
+
+function PlanForm({ plan, onDone }: { plan: QuincenaPlan; onDone: () => void }) {
+  const { state, update } = useStore();
+  const [absent, setAbsent] = useState<Record<string, number>>(plan.absentDays);
+  const [sundayOut, setSundayOut] = useState(plan.sundayOut);
+  const [guests, setGuests] = useState(plan.guestMeals);
+  const days = Math.max(1, diffDays(plan.start, plan.end));
+
+  const save = () => {
+    const p: QuincenaPlan = { ...plan, id: plan.id === 'auto' ? uid() : plan.id, absentDays: absent, sundayOut, guestMeals: guests, createdAt: new Date().toISOString() };
+    update((s) => ({ ...s, plans: [...s.plans.filter((x) => x.id !== p.id), p] }));
+    onDone();
+  };
+
+  return (
+    <div className="planform">
+      <div className="group">Días que alguien no va a estar</div>
+      <ul className="countlist">
+        {state.people
+          .filter((p) => p.active)
+          .map((p) => (
+            <li key={p.id}>
+              <span className="name">{p.name}</span>
+              <label className="inline">
+                <input type="number" inputMode="numeric" min="0" max={days} value={absent[p.id] ?? 0} onChange={(e) => setAbsent({ ...absent, [p.id]: Math.max(0, Number(e.target.value) || 0) })} />
+                <span className="muted small">días</span>
+              </label>
+            </li>
+          ))}
+      </ul>
+      <div className="group">Domingos</div>
+      <div className="seg vertical">
+        {SUNDAY_OPTS.map((o) => (
+          <button key={o.v} className={sundayOut === o.v ? 'on' : ''} onClick={() => setSundayOut(o.v)}>
+            {o.label}
+          </button>
+        ))}
+      </div>
+      <label className="field">
+        <span>Comidas extra para invitados en la quincena</span>
+        <input type="number" inputMode="numeric" min="0" value={guests} onChange={(e) => setGuests(Math.max(0, Number(e.target.value) || 0))} />
+      </label>
+      <button className="primary wide" onClick={save}>
+        Guardar y recalcular
+      </button>
     </div>
   );
 }

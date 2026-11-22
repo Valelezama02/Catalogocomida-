@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import type { Nav } from '../App';
 import { ExpiryBadge } from '../components';
-import { fmtDate } from '../domain/dates';
-import { fmtQty, UNIT_LABEL } from '../domain/format';
+import { fmtDate, relDays } from '../domain/dates';
+import { fmtQty, unitWord } from '../domain/format';
 import { normalize } from '../domain/receipt';
 import { CATEGORIES } from '../domain/types';
 import { useStore } from '../state/store';
@@ -59,15 +59,13 @@ export default function Inventory({ nav }: { nav: Nav }) {
                       <div className="muted small">
                         {!st?.hasData
                           ? 'Sin datos todavía'
-                          : st.runOut
-                            ? `Alcanza hasta ~${fmtDate(st.runOut)}`
-                            : p.rule.type === 'manual'
-                              ? 'Solo lo anotado'
-                              : 'Alcanza más de 2 meses'}
+                          : p.auto
+                            ? `Se descuenta solo · ${st.runOut ? `alcanza hasta ~${fmtDate(st.runOut)}` : 'alcanza +2 meses'}`
+                            : `Anotado ${relDays(st.lastUpdate ?? today, today)}`}
                       </div>
                     </div>
                     <div className="right">
-                      <div className={`qty ${st?.hasData && st.usableQty <= 0 ? 'zero' : ''}`}>{st?.hasData ? fmtQty(st.usableQty, p) : '—'}</div>
+                      <div className={`qty ${st?.hasData && st.usableQty <= 0 ? 'zero' : ''}`}>{st?.hasData ? `≈${fmtQty(st.usableQty, p)}` : '—'}</div>
                       {firstLot && p.shelfLifeDays < 60 && <ExpiryBadge expiry={firstLot.expiry} today={today} />}
                     </div>
                   </li>
@@ -119,14 +117,16 @@ function QuickCount({ onDone }: { onDone: () => void }) {
               <div>
                 <div className="name">{p.name}</div>
                 <div className="muted small">
-                  en {UNIT_LABEL[p.unit]} · 1 {p.packageLabel} = {fmtQty(p.packageSize, p)}
-                  {statuses[p.id]?.hasData ? ` · la app cree que hay ${fmtQty(statuses[p.id].qty, p)}` : ''}
+                  en {unitWord(p)}
+                  {p.packageSize > 1 || p.unit !== 'und' ? ` · 1 ${p.packageLabel} = ${fmtQty(p.packageSize, p)}` : ` · ${p.packageLabel}`}
+                  {statuses[p.id]?.hasData ? ` · ahora dice ≈${fmtQty(statuses[p.id].qty, p)}` : ''}
                 </div>
               </div>
               <input
                 type="number"
                 inputMode="decimal"
                 min="0"
+                step={p.unit === 'und' && p.packageSize === 1 ? 0.5 : 1}
                 placeholder="—"
                 value={vals[p.id] ?? ''}
                 onChange={(e) => setVals({ ...vals, [p.id]: e.target.value })}

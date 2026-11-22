@@ -11,8 +11,8 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {supabase ? (
       <FamilyGate>
-        {(cloud, personId, setPersonId) => (
-          <StoreProvider key={cloud.familyId} cloud={cloud} personId={personId} onPersonChange={setPersonId}>
+        {(cloud, author) => (
+          <StoreProvider key={cloud.familyId} cloud={cloud} author={author}>
             <App />
           </StoreProvider>
         )}

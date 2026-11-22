@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Section } from '../components';
 import { useFamily } from '../state/family';
-import { useStore } from '../state/store';
 import { friendlyError } from '../sync/client';
 
 export default function FamilySection() {
   const fam = useFamily();
-  const { state, setUser } = useStore();
   const [msg, setMsg] = useState<string | null>(null);
   const reload = fam?.reloadMembers;
   useEffect(() => {
@@ -22,7 +20,6 @@ export default function FamilySection() {
 
   const { membership, members, session } = fam;
   const isAdmin = membership.role === 'admin';
-  const personName = (id: string | null) => state.people.find((p) => p.id === id)?.name;
   const run = async (fn: () => Promise<void>) => {
     setMsg(null);
     try {
@@ -77,7 +74,7 @@ export default function FamilySection() {
                 {me && <span className="tag">tú</span>}
                 <br />
                 <span className="muted small">
-                  {m.email} · {personName(me ? membership.personId : m.person_id) ? `es ${personName(me ? membership.personId : m.person_id)}` : 'sin perfil'}
+                  {m.email}
                 </span>
               </span>
               {isAdmin && !me && (
@@ -106,12 +103,9 @@ export default function FamilySection() {
       <p className="muted small">
         Si alguien olvida su contraseña, en la pantalla de entrar está “Olvidé mi contraseña”. Si el correo no le llega, sácalo de la familia y que se registre con otro correo.
       </p>
-      <div className="actions2">
-        <button className="secondary" onClick={() => setUser(null)}>
-          Cambiar mi perfil
-        </button>
+      <div>
         <button
-          className="secondary danger"
+          className="secondary wide danger"
           onClick={() => {
             if (confirm('¿Cerrar sesión en este celular?')) fam.signOut();
           }}

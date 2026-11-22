@@ -180,6 +180,7 @@ export function baseQty(line: Pick<ParsedLine, 'count' | 'weightKg' | 'sizeQty' 
     if (product.unit === 'und') return line.count;
     return Math.round(line.weightKg * 1000);
   }
-  if (line.sizeQty && line.sizeUnit === product.unit) return line.count * line.sizeQty;
+  // "X30" en huevos → 30 huevos; pero si se cuenta por paquetes (pañales x50) → 1 paquete
+  if (line.sizeQty && line.sizeUnit === product.unit && (product.unit !== 'und' || product.packageSize > 1)) return line.count * line.sizeQty;
   return line.count * product.packageSize;
 }

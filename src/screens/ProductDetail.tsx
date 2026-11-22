@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ExpiryBadge, Section } from '../components';
-import { fmtDate } from '../domain/dates';
+import { fmtDate, relDays } from '../domain/dates';
 import { describeRule, fmtQty } from '../domain/format';
 import { LOCATIONS, type MovementType } from '../domain/types';
 import { useStore } from '../state/store';
@@ -15,7 +15,6 @@ export default function ProductDetail({ id, onBack }: { id: string; onBack: () =
   if (!p) return null;
   const st = statuses[id];
   const hist = state.movements.filter((m) => m.productId === id).sort((a, b) => (a.date === b.date ? (a.createdAt < b.createdAt ? 1 : -1) : a.date < b.date ? 1 : -1));
-  const who = (pid?: string) => state.people.find((x) => x.id === pid)?.name ?? '';
   const loc = (l: string) => LOCATIONS.find((x) => x.id === l)?.label ?? l;
 
   if (editing) return <ProductEditor product={p} onDone={() => setEditing(false)} />;
@@ -29,27 +28,38 @@ export default function ProductDetail({ id, onBack }: { id: string; onBack: () =
       <div className="stats">
         <div>
           <div className="muted small">Hay</div>
-          <div className="statnum">{st?.hasData ? fmtQty(st.usableQty, p) : '—'}</div>
+          <div className="statnum">{st?.hasData ? `≈${fmtQty(st.usableQty, p)}` : '—'}</div>
         </div>
-        <div>
-          <div className="muted small">Gasto estimado</div>
-          <div className="statnum">{fmtQty(st?.dailyRate ?? 0, p)}/día</div>
-        </div>
-        <div>
-          <div className="muted small">Alcanza hasta</div>
-          <div className="statnum">{st?.hasData ? (st.runOut ? fmtDate(st.runOut) : '+2 meses') : '—'}</div>
-        </div>
+        {p.auto ? (
+          <>
+            <div>
+              <div className="muted small">Gasto estimado</div>
+              <div className="statnum">{fmtQty((st?.dailyRate ?? 0) * 7, p)}/sem</div>
+            </div>
+            <div>
+              <div className="muted small">Alcanza hasta</div>
+              <div className="statnum">{st?.hasData ? (st.runOut ? fmtDate(st.runOut) : '+2 meses') : '—'}</div>
+            </div>
+          </>
+        ) : (
+          <div className="span2">
+            <div className="muted small">Último dato anotado</div>
+            <div className="statnum">{st?.lastUpdate ? `${fmtDate(st.lastUpdate)} (${relDays(st.lastUpdate, today)})` : '—'}</div>
+          </div>
+        )}
       </div>
       <p className="muted small">
-        Regla: {describeRule(p)}.
-        {st && Math.abs(st.calibration - 1) > 0.05 && ` Ajustada con los conteos: la casa gasta ${Math.round(st.calibration * 100)}% de lo que dice la regla.`}
-        {st?.lastCount && ` Último conteo: ${fmtDate(st.lastCount)}.`}
+        {p.auto
+          ? 'Se descuenta solo cada día según quiénes están en la casa. Si no cuadra, anota “Hay ahora”.'
+          : 'Solo cambia cuando alguien anota “Usé”, “Hay ahora” o “Se dañó”.'}{' '}
+        Para la lista del mercado se calcula {describeRule(p)}.
+        {st && Math.abs(st.calibration - 1) > 0.05 && ` Ajustado con los conteos: la casa gasta ${Math.round(st.calibration * 100)}% de eso.`}
       </p>
 
       <div className="seg">
-        {(['uso', 'descarte', 'conteo', ...(p.freezerDays ? ['congelar'] : [])] as MovementType[]).map((m) => (
+        {((p.auto ? ['conteo', 'descarte'] : ['uso', 'conteo', 'descarte']) as MovementType[]).map((m) => (
           <button key={m} className={mode === m ? 'on' : ''} onClick={() => setMode(mode === m ? null : m)}>
-            {m === 'uso' ? 'Usé' : m === 'descarte' ? 'Se dañó' : m === 'conteo' ? 'Conté' : 'Congelé'}
+            {m === 'uso' ? 'Usé' : m === 'descarte' ? 'Se dañó' : 'Hay ahora'}
           </button>
         ))}
       </div>
@@ -86,7 +96,7 @@ export default function ProductDetail({ id, onBack }: { id: string; onBack: () =
                   <b>{MOVE_LABEL[m.type]}</b> {fmtQty(m.qty, p)}
                   <span className="muted small">
                     {' '}
-                    · {fmtDate(m.date)} {who(m.by) && `· ${who(m.by)}`}
+                    · {fmtDate(m.date)}
                   </span>
                 </span>
                 {m.type !== 'compra' && (

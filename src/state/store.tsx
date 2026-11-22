@@ -3,12 +3,12 @@ import { fmtDate, todayISO } from '../domain/dates';
 import { computeAlerts, computeStatuses, type Alert, type ProductStatus } from '../domain/engine';
 import { fmtQty } from '../domain/format';
 import { Calc } from '../domain/household';
+import { migrate } from '../domain/migrate';
 import { createInitialState } from '../domain/seed';
 import type { AppState, Movement } from '../domain/types';
 import { useCloudSync, type CloudInfo, type SyncStatus } from '../sync/useCloudSync';
 
 const LOCAL_KEY = 'catalogo-comida:v1';
-const USER_KEY = 'catalogo-comida:usuario';
 
 function emptyState(): AppState {
   return { ...createInitialState(), people: [], products: [] };
@@ -24,7 +24,7 @@ function load(KEY: string): AppState | null {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
     const s = JSON.parse(raw) as AppState;
-    return s && s.version === 1 ? s : null;
+    return s && (s.version === 1 || s.version === 2) ? migrate(s) : null;
   } catch {
     return null;
   }
@@ -37,11 +37,11 @@ interface Store {
   calc: Calc;
   statuses: Record<string, ProductStatus>;
   alerts: Alert[];
-  user: string | null;
-  setUser: (id: string | null) => void;
-  addMovements: (ms: Omit<Movement, 'id' | 'createdAt' | 'by'>[]) => void;
+  /** Nombre de quien usa este celular (para firmar notas y pedidos). */
+  author?: string;
+  addMovements: (ms: Omit<Movement, 'id' | 'createdAt' | 'by' | 'v'>[]) => void;
   cloud?: CloudInfo;
-  sync: { status: SyncStatus; ready: boolean; syncNow: () => Promise<void> };
+  sync: { status: SyncStatus; ready: boolean; needsDbUpdate: boolean; syncNow: () => Promise<void> };
 }
 
 const Ctx = createContext<Store | null>(null);
@@ -50,22 +50,13 @@ interface ProviderProps {
   children: ReactNode;
   /** Si viene, los datos se comparten con la familia en la nube. */
   cloud?: CloudInfo;
-  personId?: string | null;
-  onPersonChange?: (id: string | null) => void;
+  author?: string;
 }
 
-export function StoreProvider({ children, cloud, personId, onPersonChange }: ProviderProps) {
+export function StoreProvider({ children, cloud, author }: ProviderProps) {
   const KEY = cloud ? `despensa:familia:${cloud.familyId}` : LOCAL_KEY;
   // Al crear una familia se parte de lo que ya había en este celular
   const [state, setState] = useState<AppState>(() => load(KEY) ?? load(LOCAL_KEY) ?? createInitialState());
-  const [localUser, setUserState] = useState<string | null>(() => {
-    try {
-      return localStorage.getItem(USER_KEY);
-    } catch {
-      return null;
-    }
-  });
-  const user = cloud ? (personId ?? null) : localUser;
   const today = todayISO();
 
   useEffect(() => {
@@ -79,26 +70,12 @@ export function StoreProvider({ children, cloud, personId, onPersonChange }: Pro
   const update = useCallback((fn: (s: AppState) => AppState) => setState((s) => fn(s)), []);
   const sync = useCloudSync(cloud, state, update, emptyState);
 
-  const setUser = useCallback((id: string | null) => {
-    if (cloud) {
-      onPersonChange?.(id);
-      return;
-    }
-    setUserState(id);
-    try {
-      if (id) localStorage.setItem(USER_KEY, id);
-      else localStorage.removeItem(USER_KEY);
-    } catch {
-      /* ignorar */
-    }
-  }, [cloud, onPersonChange]);
-
   const addMovements = useCallback(
-    (ms: Omit<Movement, 'id' | 'createdAt' | 'by'>[]) => {
+    (ms: Omit<Movement, 'id' | 'createdAt' | 'by' | 'v'>[]) => {
       const now = new Date().toISOString();
-      setState((s) => ({ ...s, movements: [...s.movements, ...ms.map((m) => ({ ...m, id: uid(), createdAt: now, by: user ?? undefined }))] }));
+      setState((s) => ({ ...s, movements: [...s.movements, ...ms.map((m) => ({ ...m, id: uid(), createdAt: now, v: 2 }))] }));
     },
-    [user],
+    [],
   );
 
   const derived = useMemo(() => {
@@ -108,7 +85,7 @@ export function StoreProvider({ children, cloud, personId, onPersonChange }: Pro
     return { calc, statuses, alerts };
   }, [state, today]);
 
-  const value: Store = { state, update, today, user, setUser, addMovements, cloud, sync, ...derived };
+  const value: Store = { state, update, today, author, addMovements, cloud, sync, ...derived };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

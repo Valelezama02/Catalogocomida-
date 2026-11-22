@@ -14,9 +14,12 @@ export interface Lot {
 export interface ProductStatus {
   productId: string;
   hasData: boolean;
-  qty: number; // total (incluye vencidos sin confirmar)
+  qty: number; // lo que hay según lo anotado (incluye vencidos sin confirmar)
   usableQty: number; // sin vencer
   lots: Lot[];
+  estLots: Lot[]; // lo que probablemente hay (para sugerir la lista del mercado)
+  estQty: number;
+  lastUpdate?: ISODate; // último dato anotado (compra, uso, conteo…)
   calibration: number; // factor aprendido con los conteos (1 = la regla tal cual)
   lastCount?: ISODate;
   dailyRate: number; // consumo estimado hoy (ya calibrado)
@@ -53,17 +56,22 @@ const clamp = (x: number, a: number, b: number) => Math.max(a, Math.min(b, x));
 
 /**
  * Reproduce la historia de un producto día por día hasta `to`.
- * Consumo de cada tramo entre conteos = máx(lo anotado, lo estimado por la regla).
- * Así si nadie anota, se descuenta lo estimado; si anotan más, cuenta lo anotado.
+ *
+ * mode = 'anotado' (lo que se muestra en "Qué hay"):
+ *   - lo que alguien anota SIEMPRE se descuenta
+ *   - si el producto es automático (aseo, despensa, bebé), además se descuenta solo cada día
+ * mode = 'estimado' (solo para sugerir la lista del mercado):
+ *   - en lo fresco, entre conteos se descuenta lo anotado o lo estimado, lo que sea mayor
  */
-export function simulateProduct(product: Product, movements: Movement[], to: ISODate, calc: Calc) {
+export function simulateProduct(product: Product, movements: Movement[], to: ISODate, calc: Calc, mode: 'anotado' | 'estimado' = 'anotado') {
   const evs = movements
     .filter((m) => m.productId === product.id)
     .sort((a, b) => (a.date === b.date ? (a.createdAt < b.createdAt ? -1 : 1) : a.date < b.date ? -1 : 1));
   const lots: Lot[] = [];
   let calibration = 1;
   let lastCount: ISODate | undefined;
-  if (evs.length === 0) return { lots, calibration, lastCount, hasData: false };
+  if (evs.length === 0) return { lots, calibration, lastCount, lastUpdate: undefined as ISODate | undefined, hasData: false };
+  const lastUpdate = evs[evs.length - 1].date;
 
   let cumLogged = 0;
   let cumEst = 0;
@@ -74,13 +82,26 @@ export function simulateProduct(product: Product, movements: Movement[], to: ISO
   const start = evs[0].date;
   const days = diffDays(start, to);
 
+  const settle = () => {
+    let target: number;
+    if (product.auto) target = cumLogged + cumEst;
+    else if (mode === 'anotado') target = cumLogged;
+    else target = Math.max(cumLogged, cumEst);
+    if (target - applied > EPS) {
+      takeFIFO(lots, target - applied);
+      applied = target;
+    }
+  };
+
   for (let k = 0; k <= days; k++) {
     const d = addDays(start, k);
-    const today: Movement[] = [];
-    while (i < evs.length && evs[i].date <= d) today.push(evs[i++]);
-    const counts = today.filter((m) => m.type === 'conteo');
-
-    for (const m of today) {
+    // lo estimado del día cuenta desde que empieza el día
+    const base = calc.base(product, d);
+    cumBase += base;
+    cumEst += base * calibration;
+    // luego, todo lo anotado, en el orden en que se anotó
+    while (i < evs.length && evs[i].date <= d) {
+      const m = evs[i++];
       switch (m.type) {
         case 'compra': {
           const loc = m.location ?? product.location;
@@ -89,6 +110,7 @@ export function simulateProduct(product: Product, movements: Movement[], to: ISO
         }
         case 'uso':
           cumLogged += m.qty;
+          settle();
           break;
         case 'descarte':
           takeFIFO(lots, m.qty);
@@ -98,34 +120,26 @@ export function simulateProduct(product: Product, movements: Movement[], to: ISO
           if (moved > EPS) lots.push({ qty: moved, expiry: addDays(d, product.freezerDays ?? 90), location: 'congelador', purchased: d });
           break;
         }
+        case 'conteo': {
+          // el conteo es la verdad en ese momento y sirve para aprender cuánto se gasta
+          settle();
+          const current = sumLots(lots);
+          const actual = applied + (current - m.qty);
+          if (mode === 'estimado' && cumBase > EPS && diffDays(anchor, d) >= 3 && actual >= 0) {
+            calibration = 0.6 * calibration + 0.4 * clamp(actual / cumBase, 0.3, 3);
+          }
+          if (current > m.qty) takeFIFO(lots, current - m.qty);
+          else if (m.qty > current) lots.push({ qty: m.qty - current, expiry: defaultExpiry(product, d), location: product.location, purchased: d });
+          cumLogged = cumEst = cumBase = applied = 0;
+          anchor = d;
+          lastCount = d;
+          break;
+        }
       }
     }
-
-    // consumo del día
-    const base = calc.base(product, d);
-    cumBase += base;
-    cumEst += base * calibration;
-    const target = Math.max(cumLogged, cumEst);
-    if (target - applied > EPS) {
-      takeFIFO(lots, target - applied);
-      applied = target;
-    }
-
-    // conteos: el conteo es la verdad al final del día
-    for (const c of counts) {
-      const current = sumLots(lots);
-      const actual = applied + (current - c.qty);
-      if (cumBase > EPS && diffDays(anchor, d) >= 3 && actual >= 0) {
-        calibration = 0.6 * calibration + 0.4 * clamp(actual / cumBase, 0.3, 3);
-      }
-      if (current > c.qty) takeFIFO(lots, current - c.qty);
-      else if (c.qty > current) lots.push({ qty: c.qty - current, expiry: defaultExpiry(product, d), location: product.location, purchased: d });
-      cumLogged = cumEst = cumBase = applied = 0;
-      anchor = d;
-      lastCount = d;
-    }
+    settle();
   }
-  return { lots, calibration, lastCount, hasData: true };
+  return { lots, calibration, lastCount, lastUpdate, hasData: true };
 }
 
 /**
@@ -165,18 +179,22 @@ export function project(
 }
 
 export function productStatus(product: Product, state: AppState, today: ISODate, calc: Calc): ProductStatus {
-  const sim = simulateProduct(product, state.movements, today, calc);
+  const sim = simulateProduct(product, state.movements, today, calc, 'anotado');
+  const est = product.auto ? sim : simulateProduct(product, state.movements, today, calc, 'estimado');
   const usable = sim.lots.filter((l) => l.expiry >= today);
-  const proj = project(sim.lots, product, sim.calibration, addDays(today, 1), 60, calc);
+  const proj = project(est.lots, product, est.calibration, addDays(today, 1), 60, calc);
   return {
     productId: product.id,
     hasData: sim.hasData,
     qty: sumLots(sim.lots),
     usableQty: sumLots(usable),
     lots: sim.lots.sort((a, b) => (a.expiry < b.expiry ? -1 : 1)),
-    calibration: sim.calibration,
+    estLots: est.lots,
+    estQty: sumLots(est.lots.filter((l) => l.expiry >= today)),
+    lastUpdate: sim.lastUpdate,
+    calibration: est.calibration,
     lastCount: sim.lastCount,
-    dailyRate: calc.base(product, today) * sim.calibration,
+    dailyRate: calc.base(product, today) * est.calibration,
     runOut: product.rule.type === 'manual' ? null : proj.runOut,
   };
 }
@@ -223,7 +241,7 @@ export function buildShoppingList(
   for (const p of ordered) {
     const st = statuses[p.id];
     const calib = st?.calibration ?? 1;
-    const lotsNow = st?.lots ?? [];
+    const lotsNow = st?.estLots ?? [];
     const preDays = Math.max(0, diffDays(today, S) - 1);
     const pre = preDays > 0 ? project(lotsNow, p, calib, addDays(today, 1), preDays, calc) : { lots: lotsNow };
     const lotsAtS = pre.lots.filter((l) => l.expiry >= S);
@@ -276,6 +294,10 @@ export function buildShoppingList(
       } else {
         buy = shortfall;
       }
+      if (p.location === 'congelador' && p.category === 'Carnes y pescado') {
+        freeze = buy;
+        notes.push('Al llegar, porcionar y congelar.');
+      }
     }
     const packages = buy > EPS ? Math.ceil(buy / p.packageSize - 1e-9) : 0;
     items.push({ product: p, need, have, buy, packages, freeze, wasted: per.wasted, coveredUntil, notes });
@@ -286,13 +308,15 @@ export function buildShoppingList(
 // ───────────────────────── Alertas ─────────────────────────
 
 export interface Alert {
-  level: 'rojo' | 'naranja' | 'amarillo';
+  level: 'rojo' | 'naranja';
   productId: string;
-  kind: 'vencido' | 'porVencer' | 'seAcaba' | 'sinStock';
+  kind: 'vencido' | 'porVencer';
   text: string;
   date: ISODate;
+  qty: number;
 }
 
+/** Solo avisa lo que se va a dañar (o ya se dañó). Lo congelado y lo que dura meses no molesta. */
 export function computeAlerts(
   state: AppState,
   statuses: Record<string, ProductStatus>,
@@ -301,26 +325,23 @@ export function computeAlerts(
   fmtDay: (d: ISODate) => string,
 ): Alert[] {
   const out: Alert[] = [];
-  const next = state.settings.nextMarket;
   for (const p of state.products) {
     const st = statuses[p.id];
     if (!p.active || !st || !st.hasData) continue;
     for (const l of st.lots) {
+      if (l.location === 'congelador' && diffDays(today, l.expiry) > 2) continue;
+      if (shelfFor(p, l.location) > 60) continue; // no perecedero
+      if (l.qty < (p.packageSize === 1 ? 0.25 : 0.05 * p.packageSize)) continue; // casi nada
       const dd = diffDays(today, l.expiry);
       if (dd < 0) {
-        out.push({ level: 'rojo', kind: 'vencido', productId: p.id, date: l.expiry, text: `${p.name}: ≈${fmtQty(l.qty, p)} se venció el ${fmtDay(l.expiry)}. ¿Se usó o se botó?` });
+        out.push({ level: 'rojo', kind: 'vencido', productId: p.id, date: l.expiry, qty: l.qty, text: `${p.name}: ≈${fmtQty(l.qty, p)} se venció el ${fmtDay(l.expiry)}.` });
       } else if (dd <= 2) {
         const when = dd === 0 ? 'hoy' : dd === 1 ? 'mañana' : 'en 2 días';
         const tip = p.freezerDays && l.location !== 'congelador' ? ' Cocinar o congelar.' : ' Usar ya.';
-        out.push({ level: 'naranja', kind: 'porVencer', productId: p.id, date: l.expiry, text: `${p.name}: ≈${fmtQty(l.qty, p)} se vence ${when}.${tip}` });
+        out.push({ level: 'naranja', kind: 'porVencer', productId: p.id, date: l.expiry, qty: l.qty, text: `${p.name}: ≈${fmtQty(l.qty, p)} se vence ${when}.${tip}` });
       }
     }
-    if (st.usableQty <= EPS && p.rule.type !== 'manual') {
-      out.push({ level: 'amarillo', kind: 'sinStock', productId: p.id, date: today, text: `${p.name}: no queda (según lo anotado).` });
-    } else if (st.runOut && st.runOut < next) {
-      out.push({ level: 'naranja', kind: 'seAcaba', productId: p.id, date: st.runOut, text: `${p.name}: se acaba ~${fmtDay(st.runOut)}, antes del mercado (${fmtDay(next)}). Ajustar el menú o reponer en la lista.` });
-    }
   }
-  const rank = { rojo: 0, naranja: 1, amarillo: 2 };
+  const rank = { rojo: 0, naranja: 1 };
   return out.sort((a, b) => rank[a.level] - rank[b.level] || (a.date < b.date ? -1 : 1));
 }

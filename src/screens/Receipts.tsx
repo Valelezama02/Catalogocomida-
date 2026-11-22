@@ -147,7 +147,7 @@ function guessStore(text: string): string {
 }
 
 function ReceiptEditor({ draft, setDraft, onClose }: { draft: Draft; setDraft: (d: Draft) => void; onClose: () => void }) {
-  const { state, update, user, today } = useStore();
+  const { state, update, today } = useStore();
   const fileRef = useRef<HTMLInputElement>(null);
   const [ocr, setOcr] = useState<{ p: number; s: string } | null>(null);
   const products = state.products.filter((p) => p.active).sort((a, b) => a.name.localeCompare(b.name, 'es'));
@@ -194,8 +194,8 @@ function ReceiptEditor({ draft, setDraft, onClose }: { draft: Draft; setDraft: (
       date: draft.date,
       store: draft.store.trim(),
       source: draft.source,
-      by: user ?? undefined,
       createdAt: new Date().toISOString(),
+      v: 2,
       lines: valid.map((l) => ({ id: l.key, raw: l.raw, productId: l.productId, qty: Number(l.qty), location: l.location, expiry: l.expiry, price: l.price })),
     };
     const now = new Date().toISOString();
@@ -208,7 +208,7 @@ function ReceiptEditor({ draft, setDraft, onClose }: { draft: Draft; setDraft: (
         receipts: [...s.receipts.filter((r) => r.id !== receipt.id), receipt],
         movements: [
           ...s.movements.filter((m) => m.receiptId !== receipt.id),
-          ...receipt.lines.map((l) => ({ id: uid(), productId: l.productId!, type: 'compra' as const, qty: l.qty, date: receipt.date, createdAt: now, by: user ?? undefined, location: l.location, expiry: l.expiry, receiptId: receipt.id })),
+          ...receipt.lines.map((l) => ({ id: uid(), productId: l.productId!, type: 'compra' as const, qty: l.qty, date: receipt.date, createdAt: now, location: l.location, expiry: l.expiry, receiptId: receipt.id, v: 2 })),
         ],
       };
     });

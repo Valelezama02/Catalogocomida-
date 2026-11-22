@@ -6,7 +6,7 @@ import type { AppState } from '../domain/types';
  * no se pisan: cada quien cambia solo sus registros.
  */
 
-export type Kind = 'product' | 'person' | 'movement' | 'receipt' | 'plan' | 'alias' | 'settings' | 'checked';
+export type Kind = 'product' | 'person' | 'movement' | 'receipt' | 'plan' | 'alias' | 'settings' | 'checked' | 'note' | 'listitem';
 
 export interface Rec {
   kind: Kind;
@@ -43,7 +43,9 @@ export function toRecords(s: AppState): Map<string, Rec> {
   s.receipts.forEach((x) => put('receipt', x.id, x));
   s.plans.forEach((x) => put('plan', x.id, x));
   Object.entries(s.aliases).forEach(([k, v]) => put('alias', k, v));
-  Object.entries(s.checked).forEach(([k, v]) => v && put('checked', k, true));
+  Object.entries(s.checked ?? {}).forEach(([k, v]) => v && put('checked', k, true));
+  (s.list ?? []).forEach((x) => put('listitem', x.id, x));
+  (s.notes ?? []).forEach((x) => put('note', x.id, x));
   put('settings', 'main', s.settings);
   return m;
 }
@@ -95,6 +97,12 @@ export function applyRecords(s: AppState, recs: RemoteRec[]): AppState {
         break;
       case 'plan':
         st = { ...st, plans: del ? st.plans.filter((x) => x.id !== r.id) : upsertById(st.plans, r.data as AppState['plans'][number]) };
+        break;
+      case 'listitem':
+        st = { ...st, list: del ? (st.list ?? []).filter((x) => x.id !== r.id) : upsertById(st.list ?? [], r.data as AppState['list'][number]) };
+        break;
+      case 'note':
+        st = { ...st, notes: del ? (st.notes ?? []).filter((x) => x.id !== r.id) : upsertById(st.notes ?? [], r.data as AppState['notes'][number]) };
         break;
       case 'alias':
         touchedAliases = true;

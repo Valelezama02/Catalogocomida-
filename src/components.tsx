@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { diffDays, fmtDate } from './domain/dates';
-import { fmtQty, quickAmounts, UNIT_LABEL } from './domain/format';
+import { fmtQty, quickAmounts, unitWord } from './domain/format';
 import { normalize } from './domain/receipt';
 import { CATEGORIES, type Product } from './domain/types';
 import { useStore } from './state/store';
@@ -29,7 +29,7 @@ export function ProductPicker({ onPick, filter }: { onPick: (id: string) => void
               {items.map((p) => (
                 <button key={p.id} className="pick" onClick={() => onPick(p.id)}>
                   <span>{p.name}</span>
-                  <span className="muted small">{statuses[p.id]?.hasData ? `hay ${fmtQty(statuses[p.id].usableQty, p)}` : 'sin datos'}</span>
+                  <span className="muted small">{statuses[p.id]?.hasData ? `hay ≈${fmtQty(statuses[p.id].usableQty, p)}` : 'sin datos'}</span>
                 </button>
               ))}
             </div>
@@ -50,13 +50,15 @@ export function QtyField({ product, value, onChange }: { product: Product; value
             {fmtQty(a, product)}
           </button>
         ))}
-        <button className="chip" onClick={() => onChange(String(product.packageSize))}>
-          1 {product.packageLabel}
-        </button>
+        {product.packageSize > 1 && (
+          <button className="chip" onClick={() => onChange(String(product.packageSize))}>
+            1 {product.packageLabel}
+          </button>
+        )}
       </div>
       <label className="field">
-        <span>Cantidad en {UNIT_LABEL[product.unit]}</span>
-        <input type="number" inputMode="decimal" min="0" value={value} onChange={(e) => onChange(e.target.value)} />
+        <span>Cantidad en {unitWord(product)}</span>
+        <input type="number" inputMode="decimal" min="0" step="any" value={value} onChange={(e) => onChange(e.target.value)} />
       </label>
     </div>
   );

@@ -29,7 +29,7 @@ create table if not exists public.members (
 -- Un registro por cosa; nunca se borra de verdad (deleted = true).
 create table if not exists public.records (
   family_id   uuid not null references public.families(id) on delete cascade,
-  kind        text not null check (kind in ('product', 'person', 'movement', 'receipt', 'plan', 'alias', 'settings', 'checked')),
+  kind        text not null,  -- product, movement, receipt, note, listitem…
   id          text not null,
   data        jsonb,
   deleted     boolean not null default false,
@@ -37,6 +37,8 @@ create table if not exists public.records (
   updated_by  uuid,
   primary key (family_id, kind, id)
 );
+-- (versión anterior limitaba los tipos; se quita para poder agregar notas y la lista)
+alter table public.records drop constraint if exists records_kind_check;
 create index if not exists records_family_updated on public.records (family_id, updated_at);
 
 -- La hora y el autor de cada cambio los pone el servidor

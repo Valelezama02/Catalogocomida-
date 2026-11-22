@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { addDays, weekday } from './dates';
-import { buildShoppingList, computeStatuses, simulateProduct } from './engine';
+import { buildShoppingList, computeAlerts, computeStatuses, simulateProduct } from './engine';
+import { migrate } from './migrate';
 import { fmtQty } from './format';
 import { Calc, dayContext } from './household';
 import { aliasKey, baseQty, matchProduct, parseReceiptText } from './receipt';
@@ -43,13 +44,15 @@ describe('inventario', () => {
   it('descuenta lo estimado si nadie anota (jabón de manos)', () => {
     const s = base();
     const p = prod(s, 'jabon-manos');
-    s.movements = [mv({ productId: p.id, type: 'compra', qty: 1000, date: MONDAY })];
+    expect(p.auto).toBe(true);
+    expect(p.countName).toBe('frasco');
+    s.movements = [mv({ productId: p.id, type: 'compra', qty: 2, date: MONDAY })];
     const calc = new Calc(s.people, s.settings, s.plans);
     const sim = simulateProduct(p, s.movements, addDays(MONDAY, 6), calc);
     const left = sim.lots.reduce((a, l) => a + l.qty, 0);
-    // ~ 5 ml × ~5.7 persona-días × 7 días ≈ 200 ml
-    expect(1000 - left).toBeGreaterThan(170);
-    expect(1000 - left).toBeLessThan(230);
+    // ~ 5 ml × ~5.7 persona-días × 7 días ≈ 200 ml ≈ 0,4 frascos de 500 ml
+    expect(2 - left).toBeGreaterThan(0.34);
+    expect(2 - left).toBeLessThan(0.46);
   });
 
   it('usa lo anotado cuando es mayor que lo estimado y no cuenta doble', () => {
@@ -80,6 +83,61 @@ describe('inventario', () => {
   });
 });
 
+describe('lo anotado siempre se descuenta (caso Tati)', () => {
+  it('en lo fresco, "usé" baja el número aunque la app haya estimado más', () => {
+    const s = base();
+    const p = prod(s, 'huevos');
+    expect(p.auto).toBe(false);
+    s.movements = [
+      mv({ productId: p.id, type: 'conteo', qty: 30, date: MONDAY }),
+      mv({ productId: p.id, type: 'uso', qty: 2, date: addDays(MONDAY, 5) }),
+    ];
+    const calc = new Calc(s.people, s.settings, s.plans);
+    const st = computeStatuses(s, addDays(MONDAY, 5), calc).huevos;
+    expect(st.qty).toBe(28); // exactamente lo anotado
+    expect(st.estQty).toBeLessThan(28); // la sugerencia del mercado sí considera lo estimado
+  });
+});
+
+describe('mismo día', () => {
+  it('un uso anotado después del conteo del mismo día sí se descuenta', () => {
+    const s = base();
+    s.movements = [
+      mv({ productId: 'huevos', type: 'conteo', qty: 24, date: MONDAY }),
+      mv({ productId: 'huevos', type: 'uso', qty: 2, date: MONDAY }),
+    ];
+    const calc = new Calc(s.people, s.settings, s.plans);
+    expect(computeStatuses(s, MONDAY, calc).huevos.qty).toBe(22);
+  });
+});
+
+describe('avisos', () => {
+  it('solo avisa lo que se daña, no lo congelado ni lo que falta', () => {
+    const s = base();
+    s.movements = [
+      mv({ productId: 'pescado', type: 'conteo', qty: 500, date: MONDAY }),
+      mv({ productId: 'mantequilla', type: 'conteo', qty: 0, date: MONDAY }),
+      mv({ productId: 'lechuga', type: 'compra', qty: 1, date: MONDAY, location: 'nevera', expiry: addDays(MONDAY, 1) }),
+    ];
+    const calc = new Calc(s.people, s.settings, s.plans);
+    const alerts = computeAlerts(s, computeStatuses(s, MONDAY, calc), MONDAY, fmtQty, (d) => d);
+    expect(alerts.map((a) => a.productId)).toEqual(['lechuga']);
+  });
+});
+
+describe('datos viejos', () => {
+  it('convierte ml/gramos a bolsas sin perder nada y una sola vez', () => {
+    const s = base();
+    const old = s.products.find((p) => p.id === 'leche')!;
+    const legacy = { ...old, unit: 'ml' as const, packageSize: 1100, v: undefined, countName: undefined };
+    const st = { ...s, version: 1, products: s.products.map((p) => (p.id === 'leche' ? legacy : p)), movements: [{ ...mv({ productId: 'leche', type: 'conteo', qty: 2200, date: MONDAY }), v: undefined }] };
+    const once = migrate(st as never);
+    expect(once.movements[0].qty).toBeCloseTo(2);
+    expect(once.products.find((p) => p.id === 'leche')!.countName).toBe('bolsa');
+    expect(migrate(once).movements[0].qty).toBeCloseTo(2);
+  });
+});
+
 describe('lista de mercado', () => {
   const plan = (s: AppState): QuincenaPlan => ({ id: 'q1', start: MONDAY, end: addDays(MONDAY, 15), absentDays: {}, sundayOut: s.settings.sundayOut, meals: { desayuno: true, almuerzo: true, cena: true }, guestMeals: 0, createdAt: 'x' });
 
@@ -102,7 +160,7 @@ describe('lista de mercado', () => {
     const list = buildShoppingList(s, computeStatuses(s, MONDAY, calc), plan(s), MONDAY, calc, fmtQty, (d) => d);
     const chicken = list.find((i) => i.product.id === 'pechuga')!;
     expect(chicken.freeze).toBeGreaterThan(0);
-    expect(chicken.freeze).toBeLessThan(chicken.buy);
+    expect(chicken.product.location).toBe('congelador');
     expect(chicken.notes.join(' ')).toContain('congelar');
   });
 
@@ -118,7 +176,7 @@ describe('lista de mercado', () => {
 
   it('no pide lo que ya alcanza', () => {
     const s = base();
-    s.movements = [mv({ productId: 'sal', type: 'conteo', qty: 3000, date: MONDAY })];
+    s.movements = [mv({ productId: 'sal', type: 'conteo', qty: 3, date: MONDAY })];
     const calc = new Calc(s.people, s.settings, s.plans);
     const list = buildShoppingList(s, computeStatuses(s, MONDAY, calc), plan(s), MONDAY, calc, fmtQty, (d) => d);
     expect(list.find((i) => i.product.id === 'sal')!.packages).toBe(0);
@@ -161,7 +219,8 @@ EFECTIVO 70.000`;
     expect(ids).toEqual(['huevos', 'arroz', 'pechuga', 'leche', 'jabon-manos']);
     expect(baseQty(lines[0], prod(s, 'huevos'))).toBe(30);
     expect(baseQty(lines[2], prod(s, 'pechuga'))).toBe(1250);
-    expect(baseQty(lines[3], prod(s, 'leche'))).toBe(2200);
+    expect(baseQty(lines[3], prod(s, 'leche'))).toBe(2); // 2 bolsas
+    expect(baseQty({ count: 1, sizeQty: 50, sizeUnit: 'und' }, prod(s, 'panales'))).toBe(1); // 1 paquete
   });
 
   it('el diccionario de equivalencias tiene prioridad', () => {

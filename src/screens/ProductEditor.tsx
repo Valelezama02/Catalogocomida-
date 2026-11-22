@@ -10,6 +10,9 @@ export function newProduct(name = ''): Product {
     category: 'Otros',
     location: 'despensa',
     unit: 'und',
+    countName: 'unidad',
+    auto: false,
+    v: 2,
     packageSize: 1,
     packageLabel: 'unidad',
     shelfLifeDays: 30,
@@ -84,8 +87,14 @@ export function ProductEditor({ product, onDone }: { product: Product; onDone: (
             <input type="number" inputMode="decimal" value={p.packageSize} onChange={(e) => set('packageSize', Math.max(0.001, num(e.target.value)))} />
           </label>
         </div>
+        {p.unit === 'und' && (
+          <label className="field">
+            <span>Se cuenta en (ej. bolsa, caja, paquete, huevo)</span>
+            <input value={p.countName ?? ''} placeholder="unidad" onChange={(e) => set('countName', e.target.value.trim().toLowerCase() || undefined)} />
+          </label>
+        )}
         <label className="field">
-          <span>Nombre de la presentación</span>
+          <span>Presentación que se compra</span>
           <input value={p.packageLabel} placeholder="ej. bolsa 5 kg" onChange={(e) => set('packageLabel', e.target.value)} />
         </label>
         <div className="row2">
@@ -107,6 +116,14 @@ export function ProductEditor({ product, onDone }: { product: Product; onDone: (
 
         <fieldset>
           <legend>Cómo se gasta</legend>
+          <label className="toggle">
+            <input type="checkbox" checked={p.auto} onChange={(e) => set('auto', e.target.checked)} />
+            <span>
+              <b>Se descuenta solo</b>
+              <br />
+              <span className="muted small">Para lo que nadie anota (jabón, sal, pañales). Si está apagado, solo cambia cuando alguien anota.</span>
+            </span>
+          </label>
           <label className="field">
             <span>Regla</span>
             <select value={p.rule.type} onChange={(e) => set('rule', { ...p.rule, type: e.target.value as RuleType })}>

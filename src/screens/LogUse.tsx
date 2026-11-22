@@ -6,14 +6,15 @@ import { fmtQty } from '../domain/format';
 import type { MovementType } from '../domain/types';
 import { useStore } from '../state/store';
 
-const MODES: { id: MovementType; label: string; help: string }[] = [
-  { id: 'uso', label: 'Usé', help: 'Lo que se cocinó o se gastó.' },
-  { id: 'descarte', label: 'Se dañó', help: 'Lo que se botó. Sirve para aprender qué se compra de más.' },
-  { id: 'conteo', label: 'Conté', help: 'Cuánto hay en este momento. Corrige el inventario y calibra la app.' },
-  { id: 'congelar', label: 'Congelé', help: 'Pasar algo de la nevera al congelador (dura mucho más).' },
+type Mode = 'uso' | 'conteo' | 'descarte';
+
+const MODES: { id: Mode; label: string; help: string }[] = [
+  { id: 'uso', label: 'Usé', help: 'Lo que se cocinó o se gastó. Se descuenta de una vez.' },
+  { id: 'conteo', label: 'Hay ahora', help: 'Cuánto hay en este momento (más o menos). Corrige el inventario.' },
+  { id: 'descarte', label: 'Se dañó', help: 'Lo que se botó. Sirve para comprar menos de eso.' },
 ];
 
-export const MOVE_LABEL: Record<MovementType, string> = { compra: 'Compra', uso: 'Usó', descarte: 'Se dañó', conteo: 'Conteo', congelar: 'Congeló' };
+export const MOVE_LABEL: Record<MovementType, string> = { compra: 'Compra', uso: 'Se usó', descarte: 'Se dañó', conteo: 'Había', congelar: 'Se congeló' };
 
 export function ActionForm({ productId, mode, onSaved }: { productId: string; mode: MovementType; onSaved?: () => void }) {
   const { state, addMovements, today } = useStore();
@@ -45,8 +46,8 @@ export function ActionForm({ productId, mode, onSaved }: { productId: string; mo
 }
 
 export default function LogUse({ nav }: { nav: Nav }) {
-  const { state, update, user } = useStore();
-  const [mode, setMode] = useState<MovementType>('uso');
+  const { state, update } = useStore();
+  const [mode, setMode] = useState<Mode>('uso');
   const [pid, setPid] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const product = state.products.find((p) => p.id === pid);
@@ -54,19 +55,28 @@ export default function LogUse({ nav }: { nav: Nav }) {
     .filter((m) => m.type !== 'compra')
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))
     .slice(0, 15);
-  const name = (id?: string) => state.people.find((p) => p.id === id)?.name ?? '—';
 
   return (
     <div className="screen">
       <h1>Anotar</h1>
       <div className="seg">
         {MODES.map((m) => (
-          <button key={m.id} className={mode === m.id ? 'on' : ''} onClick={() => setMode(m.id)}>
+          <button
+            key={m.id}
+            className={mode === m.id ? 'on' : ''}
+            onClick={() => {
+              setMode(m.id);
+              setPid(null);
+            }}
+          >
             {m.label}
           </button>
         ))}
       </div>
-      <p className="muted small">{MODES.find((m) => m.id === mode)!.help} No hace falta anotar todo: lo que no se anote, la app lo estima.</p>
+      <p className="muted small">
+        {MODES.find((m) => m.id === mode)!.help}
+        {mode === 'uso' && ' Lo de aseo, despensa y de Gracia no hace falta anotarlo: se descuenta solo.'}
+      </p>
 
       {saved && <div className="toast">✓ {saved}</div>}
 
@@ -91,7 +101,7 @@ export default function LogUse({ nav }: { nav: Nav }) {
           />
         </div>
       ) : (
-        <ProductPicker onPick={setPid} filter={mode === 'congelar' ? (p) => !!p.freezerDays : undefined} />
+        <ProductPicker onPick={setPid} filter={mode === 'uso' ? (p) => !p.auto : undefined} />
       )}
 
       {recent.length > 0 && (
@@ -105,16 +115,11 @@ export default function LogUse({ nav }: { nav: Nav }) {
                 <li key={m.id}>
                   <span onClick={() => nav.openProduct(p.id)}>
                     <b>{MOVE_LABEL[m.type]}</b> {fmtQty(m.qty, p)} de {p.name}
-                    <span className="muted small">
-                      {' '}
-                      · {name(m.by)} · {fmtDate(m.date)}
-                    </span>
+                    <span className="muted small"> · {fmtDate(m.date)}</span>
                   </span>
-                  {(m.by === user || !m.by) && (
-                    <button className="link danger" onClick={() => update((s) => ({ ...s, movements: s.movements.filter((x) => x.id !== m.id) }))}>
-                      Deshacer
-                    </button>
-                  )}
+                  <button className="link danger" onClick={() => update((s) => ({ ...s, movements: s.movements.filter((x) => x.id !== m.id) }))}>
+                    Deshacer
+                  </button>
                 </li>
               );
             })}

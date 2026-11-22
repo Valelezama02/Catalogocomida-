@@ -5,13 +5,43 @@ function num(x: number): string {
   return r.toLocaleString('es-CO', { maximumFractionDigits: 1 });
 }
 
-export function fmtUnitQty(q: number, unit: Unit): string {
-  if (unit === 'g') return q >= 1000 ? `${num(q / 1000)} kg` : `${num(q)} g`;
-  if (unit === 'ml') return q >= 1000 ? `${num(q / 1000)} L` : `${num(q)} ml`;
-  return `${num(q)} und`;
+export function plural(name: string): string {
+  if (/ón$/.test(name)) return name.replace(/ón$/, 'ones');
+  if (/[aeiouáéíóú]$/i.test(name)) return name + 's';
+  if (/z$/.test(name)) return name.replace(/z$/, 'ces');
+  return name + 'es';
 }
 
-export const fmtQty = (q: number, p: Product) => fmtUnitQty(q, p.unit);
+/** Redondea a medios para paquetes ("más o menos cuántas bolsas") y a enteros para piezas. */
+function countText(q: number, name: string, halves: boolean): string {
+  const r = halves ? Math.round(q * 2) / 2 : Math.round(q);
+  if (r === 0 && q > 0.01) return `casi nada`;
+  const whole = Math.floor(r);
+  const half = r - whole >= 0.5;
+  const n = half ? (whole === 0 ? '½' : `${whole}½`) : String(whole);
+  return `${n} ${r === 1 ? name : plural(name)}`;
+}
+
+export function fmtUnitQty(q: number, unit: Unit, countName = 'unidad', halves = false): string {
+  if (unit === 'g') return q >= 1000 ? `${num(q / 1000)} kg` : `${num(q)} g`;
+  if (unit === 'ml') return q >= 1000 ? `${num(q / 1000)} L` : `${num(q)} ml`;
+  return countText(q, countName, halves);
+}
+
+export const fmtQty = (q: number, p: Product) => fmtUnitQty(q, p.unit, p.countName, p.packageSize === 1);
+
+/** Nombre de la unidad para los formularios ("bolsas", "gramos"…). */
+export function unitWord(p: Product): string {
+  if (p.unit === 'und') return plural(p.countName ?? 'unidad');
+  return UNIT_LABEL[p.unit];
+}
+
+/** Cantidad exacta para la regla (sin redondear). */
+function exact(q: number, p: Product): string {
+  if (p.unit !== 'und') return fmtUnitQty(q, p.unit);
+  const r = Math.round(q * 100) / 100;
+  return `${r.toLocaleString('es-CO')} ${r === 1 ? p.countName ?? 'unidad' : plural(p.countName ?? 'unidad')}`;
+}
 
 export const UNIT_LABEL: Record<Unit, string> = { g: 'gramos', ml: 'mililitros', und: 'unidades' };
 
@@ -26,7 +56,7 @@ export const RULE_LABEL: Record<ConsumptionRule['type'], string> = {
 
 export function describeRule(p: Product): string {
   const r = p.rule;
-  const q = fmtUnitQty(r.qty, p.unit);
+  const q = exact(r.qty, p);
   const what = r.type === 'desayuno' ? 'los desayunos' : 'las comidas';
   const sh = r.share != null && r.share < 1 ? `, en ${Math.round(r.share * 100)}% de ${what}` : '';
   switch (r.type) {
@@ -47,6 +77,7 @@ export function describeRule(p: Product): string {
 
 export function quickAmounts(p: Product): number[] {
   if (p.unit === 'und') {
+    if (p.packageSize === 1) return [0.5, 1, 2, 3];
     if (p.packageSize >= 20) return [1, 2, 3, 6, 12];
     return [1, 2, 3, 5];
   }
