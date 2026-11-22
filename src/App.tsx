@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useFamily } from './state/family';
 import { useStore } from './state/store';
 import Home from './screens/Home';
 import Inventory from './screens/Inventory';
@@ -24,29 +25,48 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
 ];
 
 function WhoAmI() {
-  const { state, setUser } = useStore();
+  const { state, setUser, cloud } = useStore();
+  const fam = useFamily();
+  const takenBy = (pid: string) => fam?.members.find((m) => m.person_id === pid && m.user_id !== fam.session.user.id)?.display_name;
   return (
     <div className="screen whoami">
-      <h1>¿Quién eres?</h1>
-      <p className="muted">Así la app sabe quién anota cada cosa. Se pregunta una sola vez en este celular.</p>
+      <h1>¿Quién eres en la casa?</h1>
+      <p className="muted">
+        {cloud
+          ? 'Elige tu perfil. Así la app sabe quién anota cada cosa y cuenta bien tus días y comidas.'
+          : 'Así la app sabe quién anota cada cosa. Se pregunta una sola vez en este celular.'}
+      </p>
       <div className="grid2">
         {state.people
           .filter((p) => p.active && p.type !== 'bebe')
           .map((p) => (
             <button key={p.id} className="big" onClick={() => setUser(p.id)}>
               {p.name}
+              {takenBy(p.id) && <div className="muted small">ya lo eligió {takenBy(p.id)}</div>}
             </button>
           ))}
       </div>
-      <p className="muted small">Los nombres se cambian en Ajustes → Personas.</p>
+      <p className="muted small">
+        {state.people.length === 0 ? 'Todavía no hay perfiles en esta familia.' : 'Los nombres se cambian en Ajustes → Personas.'}
+      </p>
     </div>
   );
 }
 
+const SYNC_LABEL: Record<string, string> = { cargando: 'Cargando…', ok: 'Al día', subiendo: 'Guardando…', 'sin-conexion': 'Sin conexión: se guarda al volver' };
+
 export default function App() {
-  const { state, user, setUser } = useStore();
+  const { state, user, setUser, cloud, sync } = useStore();
   const [tab, setTab] = useState<Tab>('inicio');
   const [productId, setProductId] = useState<string | null>(null);
+
+  if (!sync.ready)
+    return (
+      <div className="screen whoami center">
+        <div className="brand big-brand">Despensa</div>
+        <p className="muted">{sync.status === 'sin-conexion' ? 'No hay conexión. Conéctate a internet para bajar los datos de la familia.' : 'Bajando los datos de la familia…'}</p>
+      </div>
+    );
 
   const me = state.people.find((p) => p.id === user);
   if (!me) return <WhoAmI />;
@@ -78,6 +98,7 @@ export default function App() {
         <div className="brand" onClick={() => nav.go('inicio')}>
           Despensa
         </div>
+        {cloud && <span className={`dot ${sync.status}`} title={SYNC_LABEL[sync.status]} onClick={() => sync.syncNow()} />}
         <button className="chip" onClick={() => setUser(null)} title="Cambiar persona">
           👤 {me.name}
         </button>

@@ -644,3 +644,55 @@ ul.rlines li.unmatched {
     grid-template-columns: 1fr;
   }
 }
+
+.big-brand {
+  font-size: 2rem;
+  margin-bottom: 8px;
+}
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--ok);
+  cursor: pointer;
+  flex: none;
+}
+.dot.subiendo,
+.dot.cargando {
+  background: var(--soon);
+}
+.dot.sin-conexion {
+  background: var(--bad);
+}
+.code-input {
+  font-size: 1.4rem;
+  letter-spacing: 0.15em;
+  text-align: center;
+  font-weight: 700;
+}
+.codebox {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  text-align: center;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  margin: 8px 0;
+  user-select: all;
+}
+.tag {
+  font-size: 0.72rem;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-weight: 700;
+  margin-left: 4px;
+}
+.col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}

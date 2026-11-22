@@ -5,12 +5,14 @@ import { WEEKDAYS_SHORT } from '../domain/dates';
 import { describeRule } from '../domain/format';
 import { CATEGORIES, type AppState, type Person, type PersonType } from '../domain/types';
 import { exportJSON, resetState, uid, useStore } from '../state/store';
+import FamilySection from './FamilySection';
 import { newProduct, ProductEditor } from './ProductEditor';
 
 const TYPE_LABEL: Record<PersonType, string> = { residente: 'Vive en la casa', empleada: 'Viene a trabajar', bebe: 'Bebé' };
 
 export default function Settings({ nav }: { nav: Nav }) {
-  const { state, update } = useStore();
+  const { state, update, cloud } = useStore();
+  const canReset = !cloud || cloud.isAdmin;
   const [editProduct, setEditProduct] = useState<string | null>(null);
   const [newP, setNewP] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -44,6 +46,8 @@ export default function Settings({ nav }: { nav: Nav }) {
   return (
     <div className="screen">
       <h1>Ajustes</h1>
+
+      <FamilySection />
 
       <Section title="Personas de la casa">
         <p className="muted small">Días en la casa y comidas. Con esto se calcula cuánto se gasta.</p>
@@ -166,26 +170,23 @@ export default function Settings({ nav }: { nav: Nav }) {
         })}
       </Section>
 
-      <Section title="Grupo familiar">
-        <p className="muted small">
-          Por ahora los datos se guardan en este celular. La próxima versión conecta a toda la casa en un mismo grupo para que cada quien anote desde su celular. Mientras tanto, puedes pasar los datos con una copia.
-        </p>
-      </Section>
-
       <Section title="Datos">
         <div className="actions2">
           <button className="secondary" onClick={download}>
             Descargar copia
           </button>
-          <button className="secondary" onClick={() => fileRef.current?.click()}>
-            Cargar copia
-          </button>
+          {canReset && (
+            <button className="secondary" onClick={() => fileRef.current?.click()}>
+              Cargar copia
+            </button>
+          )}
         </div>
         <input ref={fileRef} type="file" accept="application/json" hidden onChange={(e) => doImport(e.target.files?.[0])} />
+        {canReset && (
         <button
           className="link danger"
           onClick={() => {
-            if (confirm('¿Borrar TODO y empezar de cero?')) {
+            if (confirm(cloud ? '¿Borrar TODO y empezar de cero? Se borra para toda la familia.' : '¿Borrar TODO y empezar de cero?')) {
               update(() => resetState());
               nav.go('inicio');
             }
@@ -193,6 +194,7 @@ export default function Settings({ nav }: { nav: Nav }) {
         >
           Borrar todo y empezar de cero
         </button>
+        )}
       </Section>
     </div>
   );

@@ -5,16 +5,21 @@ import { fmtQty } from '../domain/format';
 import { Calc } from '../domain/household';
 import { createInitialState } from '../domain/seed';
 import type { AppState, Movement } from '../domain/types';
+import { useCloudSync, type CloudInfo, type SyncStatus } from '../sync/useCloudSync';
 
-const KEY = 'catalogo-comida:v1';
+const LOCAL_KEY = 'catalogo-comida:v1';
 const USER_KEY = 'catalogo-comida:usuario';
+
+function emptyState(): AppState {
+  return { ...createInitialState(), people: [], products: [] };
+}
 
 export function uid(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
-function load(): AppState | null {
+function load(KEY: string): AppState | null {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return null;
@@ -35,19 +40,32 @@ interface Store {
   user: string | null;
   setUser: (id: string | null) => void;
   addMovements: (ms: Omit<Movement, 'id' | 'createdAt' | 'by'>[]) => void;
+  cloud?: CloudInfo;
+  sync: { status: SyncStatus; ready: boolean; syncNow: () => Promise<void> };
 }
 
 const Ctx = createContext<Store | null>(null);
 
-export function StoreProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AppState>(() => load() ?? createInitialState());
-  const [user, setUserState] = useState<string | null>(() => {
+interface ProviderProps {
+  children: ReactNode;
+  /** Si viene, los datos se comparten con la familia en la nube. */
+  cloud?: CloudInfo;
+  personId?: string | null;
+  onPersonChange?: (id: string | null) => void;
+}
+
+export function StoreProvider({ children, cloud, personId, onPersonChange }: ProviderProps) {
+  const KEY = cloud ? `despensa:familia:${cloud.familyId}` : LOCAL_KEY;
+  // Al crear una familia se parte de lo que ya había en este celular
+  const [state, setState] = useState<AppState>(() => load(KEY) ?? load(LOCAL_KEY) ?? createInitialState());
+  const [localUser, setUserState] = useState<string | null>(() => {
     try {
       return localStorage.getItem(USER_KEY);
     } catch {
       return null;
     }
   });
+  const user = cloud ? (personId ?? null) : localUser;
   const today = todayISO();
 
   useEffect(() => {
@@ -56,9 +74,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch {
       /* sin almacenamiento: la app sigue funcionando en memoria */
     }
-  }, [state]);
+  }, [state, KEY]);
+
+  const update = useCallback((fn: (s: AppState) => AppState) => setState((s) => fn(s)), []);
+  const sync = useCloudSync(cloud, state, update, emptyState);
 
   const setUser = useCallback((id: string | null) => {
+    if (cloud) {
+      onPersonChange?.(id);
+      return;
+    }
     setUserState(id);
     try {
       if (id) localStorage.setItem(USER_KEY, id);
@@ -66,9 +91,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } catch {
       /* ignorar */
     }
-  }, []);
-
-  const update = useCallback((fn: (s: AppState) => AppState) => setState((s) => fn(s)), []);
+  }, [cloud, onPersonChange]);
 
   const addMovements = useCallback(
     (ms: Omit<Movement, 'id' | 'createdAt' | 'by'>[]) => {
@@ -85,7 +108,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return { calc, statuses, alerts };
   }, [state, today]);
 
-  const value: Store = { state, update, today, user, setUser, addMovements, ...derived };
+  const value: Store = { state, update, today, user, setUser, addMovements, cloud, sync, ...derived };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
