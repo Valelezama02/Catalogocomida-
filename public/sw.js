@@ -1,5 +1,5 @@
 // Service worker sencillo: red primero, caché si no hay internet.
-const CACHE = 'despensa-v1';
+const CACHE = 'despensa-v2';
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['/', '/index.html'])));
   self.skipWaiting();

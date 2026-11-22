@@ -1,5 +1,6 @@
 import type { Session } from '@supabase/supabase-js';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { InstallBanner } from '../install';
 import { friendlyError, supabase } from '../sync/client';
 import type { CloudInfo } from '../sync/useCloudSync';
 
@@ -210,6 +211,7 @@ function AuthScreen() {
     <div className="screen whoami">
       <div className="brand big-brand">Despensa</div>
       <p className="muted">El mercado de la quincena, sin que falte nada ni se dañe nada.</p>
+      <InstallBanner />
       <div className="seg">
         <button className={mode === 'nueva' ? 'on' : ''} onClick={() => setMode('nueva')}>
           Crear cuenta

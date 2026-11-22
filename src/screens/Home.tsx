@@ -1,5 +1,6 @@
 import type { Nav } from '../App';
 import { Section } from '../components';
+import { InstallBanner } from '../install';
 import { diffDays, fmtDate } from '../domain/dates';
 import { useStore } from '../state/store';
 
@@ -16,6 +17,7 @@ export default function Home({ nav }: { nav: Nav }) {
   return (
     <div className="screen">
       <h1>Hola, {me?.name}</h1>
+      <InstallBanner />
 
       <div className="hero" onClick={() => nav.go('mercado')}>
         <div className="muted small">Próximo mercado</div>

@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import './install';
 import { FamilyGate } from './state/family';
 import { StoreProvider } from './state/store';
 import { supabase } from './sync/client';

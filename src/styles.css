@@ -696,3 +696,10 @@ ul.rlines li.unmatched {
   flex-direction: column;
   align-items: flex-end;
 }
+.installbox {
+  background: var(--brand-soft);
+  border-color: transparent;
+}
+.installbox .steps {
+  margin: 8px 0 4px;
+}
