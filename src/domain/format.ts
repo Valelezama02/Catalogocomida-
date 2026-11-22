@@ -27,7 +27,8 @@ export const RULE_LABEL: Record<ConsumptionRule['type'], string> = {
 export function describeRule(p: Product): string {
   const r = p.rule;
   const q = fmtUnitQty(r.qty, p.unit);
-  const sh = r.share != null && r.share < 1 ? `, en ${Math.round(r.share * 100)}% de las comidas` : '';
+  const what = r.type === 'desayuno' ? 'los desayunos' : 'las comidas';
+  const sh = r.share != null && r.share < 1 ? `, en ${Math.round(r.share * 100)}% de ${what}` : '';
   switch (r.type) {
     case 'porcion':
       return `${q} por porción${sh}`;

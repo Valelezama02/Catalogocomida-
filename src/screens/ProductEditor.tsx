@@ -125,7 +125,7 @@ export function ProductEditor({ product, onDone }: { product: Product; onDone: (
               </label>
               {hasShare && (
                 <label className="field">
-                  <span>% de comidas que lo llevan</span>
+                  <span>% de {p.rule.type === 'desayuno' ? 'desayunos' : 'almuerzos/cenas'} que lo llevan</span>
                   <input
                     type="number"
                     inputMode="numeric"
